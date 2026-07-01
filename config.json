@@ -1,4 +1,19 @@
 {
     "dir": "/home/mason/app",
-    "splash-img": "splash.png"
+    "splash-img": "splash.png",
+    "update_directories": [
+        "docker",
+        "docker/wifi-connect"
+    ],
+    "update_files": [
+        "pi-controller",
+        "updater",
+        "runner",
+        "splash.png",
+        "version.json",
+        "publickey.pem",
+        "config.json",
+        "docker/docker-compose.yml",
+        "docker/wifi-connect/Dockerfile.template"
+    ]
 }

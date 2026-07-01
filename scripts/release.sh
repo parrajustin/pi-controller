@@ -17,7 +17,7 @@ cat <<EOF > version.json
 EOF
 
 mkdir -p dist
-cp version.json splash.png publickey.pem dist/
+cp version.json splash.png publickey.pem config.json dist/
 cp -r docker dist/
 
 # Build and package for aarch64 (arm64)
@@ -30,7 +30,7 @@ GOOS=linux GOARCH=arm64 go build -o dist/runner ./cmd/runner
 
 echo "Packaging release for aarch64..."
 TARBALL_AARCH64="dist/pi-controller-aarch64.tar.gz"
-tar -czvf "$TARBALL_AARCH64" -C dist pi-controller updater runner version.json splash.png publickey.pem docker
+tar -czvf "$TARBALL_AARCH64" -C dist pi-controller updater runner version.json splash.png publickey.pem config.json docker
 
 echo "Signing release with privatekey.pem..."
 SIGNATURE_AARCH64="dist/pi-controller-aarch64.tar.gz.sig"
@@ -46,7 +46,7 @@ GOOS=linux GOARCH=amd64 go build -o dist/runner ./cmd/runner
 
 echo "Packaging release for x86_64..."
 TARBALL_X86_64="dist/pi-controller-x86_64.tar.gz"
-tar -czvf "$TARBALL_X86_64" -C dist pi-controller updater runner version.json splash.png publickey.pem docker
+tar -czvf "$TARBALL_X86_64" -C dist pi-controller updater runner version.json splash.png publickey.pem config.json docker
 
 echo "Signing release with privatekey.pem..."
 SIGNATURE_X86_64="dist/pi-controller-x86_64.tar.gz.sig"

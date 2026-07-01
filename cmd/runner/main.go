@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -15,8 +16,6 @@ const (
 	updateDir    = "update"
 	pollInterval = 10 * time.Minute
 )
-
-var filesToMove = []string{"pi-controller", "updater", "runner", "splash.png", "version.json", "publickey.pem"}
 
 func main() {
 	logger.Init("runner")
@@ -41,13 +40,46 @@ func main() {
 }
 
 func applyUpdate() {
-	for _, f := range filesToMove {
+	// Read config.json from update directory first, fallback to local
+	configPath := filepath.Join(updateDir, "config.json")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		configPath = "config.json"
+	}
+
+	configFile, err := os.Open(configPath)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to open config.json: %v", err))
+		return
+	}
+	defer configFile.Close()
+
+	var config struct {
+		UpdateDirectories []string `json:"update_directories"`
+		UpdateFiles       []string `json:"update_files"`
+	}
+	if err := json.NewDecoder(configFile).Decode(&config); err != nil {
+		slog.Error(fmt.Sprintf("Failed to parse config.json: %v", err))
+		return
+	}
+
+	// 1. Create necessary directories
+	for _, d := range config.UpdateDirectories {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			slog.Error(fmt.Sprintf("Failed to create directory %s: %v", d, err))
+		}
+	}
+
+	// 2. Move files
+	for _, f := range config.UpdateFiles {
 		src := filepath.Join(updateDir, f)
 		if _, err := os.Stat(src); os.IsNotExist(err) {
 			continue
 		}
+		// Remove destination if it exists
+		os.Remove(f)
+
 		// Move file using Rename
-		err := os.Rename(src, f)
+		err = os.Rename(src, f)
 		if err != nil {
 			slog.Error(fmt.Sprintf("Failed to move %s: %v", f, err))
 		}
