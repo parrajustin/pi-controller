@@ -4,7 +4,8 @@
     "update_directories": [
         "docker",
         "docker/wifi-connect",
-        "docker/wifi-connect/scripts"
+        "docker/wifi-connect/scripts",
+        "docker/kiosk"
     ],
     "update_files": [
         "pi-controller",
@@ -16,7 +17,9 @@
         "config.json",
         "docker/docker-compose.yml",
         "docker/wifi-connect/Dockerfile",
-        "docker/wifi-connect/scripts/start.sh"
+        "docker/wifi-connect/scripts/start.sh",
+        "docker/kiosk/Dockerfile",
+        "docker/kiosk/start.sh"
     ],
     "root_files": [
         "pi-controller",

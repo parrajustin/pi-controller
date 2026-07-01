@@ -16,4 +16,17 @@ services:
       io.balena.features.firmware: '1'
     cap_add:
         - NET_ADMIN
+  kiosk:
+    restart: always
+    build: ./kiosk
+    privileged: true
+    ports:
+      - 5011:5011
+    volumes:
+      - 'settings:/data'
+    environment:
+      LAUNCH_URL: "mountainviewmasoniclodge.com"
+      LAUNCH_URL_HDMI: "https://www.google.com"
+    depends_on:
+      - wifi-connect
 

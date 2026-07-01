@@ -1,6 +1,10 @@
 FROM debian:bullseye
 
-RUN apt-get update && apt-get install -y --no-install-recommends dnsmasq wireless-tools wget ca-certificates
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    dnsmasq wireless-tools \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 # use latest version. If specific version is required, it should be provided as vX.Y.Z, e.g v4.11.37
 ARG VERSION="latest"
