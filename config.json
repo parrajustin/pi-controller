@@ -3,7 +3,8 @@
     "splash-img": "splash.png",
     "update_directories": [
         "docker",
-        "docker/wifi-connect"
+        "docker/wifi-connect",
+        "docker/wifi-connect/scripts"
     ],
     "update_files": [
         "pi-controller",
@@ -14,6 +15,7 @@
         "publickey.pem",
         "config.json",
         "docker/docker-compose.yml",
-        "docker/wifi-connect/Dockerfile.template"
+        "docker/wifi-connect/Dockerfile.template",
+        "docker/wifi-connect/scripts/start.sh"
     ]
 }
