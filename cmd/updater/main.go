@@ -168,15 +168,21 @@ func runUpdate(version string) error {
 
 func downloadFile(url, dest string) error {
 	var err error
-	for i := 0; i < 3; i++ {
+	backoff := 2 * time.Second
+	for i := 1; ; i++ {
 		err = doDownloadFile(url, dest)
 		if err == nil {
 			return nil
 		}
-		slog.Error(fmt.Sprintf("Download failed (attempt %d/3): %v", i+1, err))
-		time.Sleep(2 * time.Second)
+		if backoff > time.Hour {
+			slog.Error(fmt.Sprintf("Download failed (attempt %d): %v. Backoff %v exceeds 1hr limit.", i, err, backoff))
+			return err
+		}
+		slog.Error(fmt.Sprintf("Download failed (attempt %d): %v", i, err))
+		slog.Info(fmt.Sprintf("Sleeping for %v before next attempt...", backoff))
+		time.Sleep(backoff)
+		backoff *= 2
 	}
-	return err
 }
 
 func doDownloadFile(url, dest string) error {
