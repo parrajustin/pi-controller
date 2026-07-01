@@ -56,13 +56,30 @@ func applyUpdate() {
 	var config struct {
 		UpdateDirectories []string `json:"update_directories"`
 		UpdateFiles       []string `json:"update_files"`
+		RootFiles         []string `json:"root_files"`
 	}
 	if err := json.NewDecoder(configFile).Decode(&config); err != nil {
 		slog.Error(fmt.Sprintf("Failed to parse config.json: %v", err))
 		return
 	}
 
-	// 1. Create necessary directories
+	// 1. Clean up old files and directories
+	rootFilesMap := make(map[string]bool)
+	for _, f := range config.RootFiles {
+		rootFilesMap[f] = true
+	}
+
+	for _, d := range config.UpdateDirectories {
+		os.RemoveAll(d)
+	}
+
+	for _, f := range config.UpdateFiles {
+		if !rootFilesMap[f] {
+			os.Remove(f)
+		}
+	}
+
+	// 2. Create necessary directories
 	for _, d := range config.UpdateDirectories {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			slog.Error(fmt.Sprintf("Failed to create directory %s: %v", d, err))

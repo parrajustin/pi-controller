@@ -15,7 +15,14 @@
         "publickey.pem",
         "config.json",
         "docker/docker-compose.yml",
-        "docker/wifi-connect/Dockerfile.template",
+        "docker/wifi-connect/Dockerfile",
         "docker/wifi-connect/scripts/start.sh"
+    ],
+    "root_files": [
+        "pi-controller",
+        "updater",
+        "runner",
+        "config.json",
+        "version.json"
     ]
 }
