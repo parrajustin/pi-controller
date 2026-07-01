@@ -102,7 +102,7 @@ func stopContainers() {
 
 func startDockerCompose() {
 	slog.Info("Starting docker compose services...")
-	cmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "up")
+	cmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "up", "--build", "--force-recreate", "-d")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

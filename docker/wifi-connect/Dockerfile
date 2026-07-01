@@ -1,6 +1,6 @@
 FROM debian:bullseye
 
-RUN apt-get update && apt-get install -y --no-install-recommends dnsmasq wireless-tools curl
+RUN apt-get update && apt-get install -y --no-install-recommends dnsmasq wireless-tools wget ca-certificates
 
 # use latest version. If specific version is required, it should be provided as vX.Y.Z, e.g v4.11.37
 ARG VERSION="latest"
@@ -9,6 +9,8 @@ ARG VERSION="latest"
 WORKDIR /usr/src/app/ui
 
 WORKDIR /usr/src/app
+
+WORKDIR /usr/src
 
 RUN \
     export BASE_URL="https://github.com/balena-os/wifi-connect/releases" &&\    
@@ -28,10 +30,12 @@ RUN \
     else \
         export URL_PARTIAL="download/${VERSION}" ; \
     fi; \
-    curl -Ls "$BASE_URL/$URL_PARTIAL/wifi-connect-$BINARY_ARCH_NAME.tar.gz" \
-    | tar -xvz -C  /usr/src/app/ &&\
-    curl -Ls "$BASE_URL/$URL_PARTIAL/wifi-connect-ui.tar.gz" \
-    | tar -xvz -C  /usr/src/app/ui 
+    wget "$BASE_URL/$URL_PARTIAL/wifi-connect-$BINARY_ARCH_NAME.tar.gz" ; \
+    tar -xf "wifi-connect-$BINARY_ARCH_NAME.tar.gz" -C /usr/src/app/ ;\
+    wget "$BASE_URL/$URL_PARTIAL/wifi-connect-ui.tar.gz" ; \
+    tar -xf "wifi-connect-ui.tar.gz" -C  /usr/src/app/ui 
+
+WORKDIR /usr/src/app
 
 COPY scripts/start.sh .
 
