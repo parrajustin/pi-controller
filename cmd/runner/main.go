@@ -63,7 +63,10 @@ func runPiControllerLoop() {
 		cmd.Stderr = os.Stderr
 		
 		err := cmd.Run()
-		log.Printf("pi-controller exited with error: %v. Restarting in 5 seconds...", err)
+		if err != nil {
+			log.Fatalf("pi-controller failed: %v. Failing runner as well.", err)
+		}
+		log.Printf("pi-controller exited without error. Restarting in 5 seconds...")
 		time.Sleep(5 * time.Second)
 	}
 }
