@@ -1,0 +1,19 @@
+version: '2'
+volumes:
+  settings:
+services:
+  wifi-connect:
+    build: ./wifi-connect
+    restart: always
+    network_mode: host
+    privileged: true
+    environment:
+      - PORTAL_SSID=mvda-lounge-display-wifi-portal
+      - PORTAL_PASSPHRASE=mountainviewmasoniclodge
+      - DBUS_SYSTEM_BUS_ADDRESS="unix:path=/host/run/dbus/system_bus_socket"
+    labels:
+      io.balena.features.dbus: '1'
+      io.balena.features.firmware: '1'
+    cap_add:
+        - NET_ADMIN
+

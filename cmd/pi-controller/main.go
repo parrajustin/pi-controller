@@ -100,6 +100,18 @@ func stopContainers() {
 	}
 }
 
+func startDockerCompose() {
+	slog.Info("Starting docker compose services...")
+	cmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "up")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		slog.Error(fmt.Sprintf("Failed to run docker compose: %v", err))
+	} else {
+		slog.Info("Successfully started docker compose services.")
+	}
+}
+
 func main() {
 	logger.Init("pi-controller")
 	slog.Info("Starting pi-controller...")
@@ -113,6 +125,8 @@ func main() {
 	checkAndReplaceSplash()
 
 	stopContainers()
+
+	startDockerCompose()
 
 	// Main application loop
 	// For now, it just simulates the pi-controller running
