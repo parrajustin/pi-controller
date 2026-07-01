@@ -88,6 +88,18 @@ plymouth-set-default-theme --rebuild-initrd pix`
 	}
 }
 
+func stopContainers() {
+	slog.Info("Stopping all Docker containers...")
+	cmd := exec.Command("bash", "-c", "docker stop $(docker ps -q)")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		slog.Info(fmt.Sprintf("Command returned an error (likely no containers to stop): %v", err))
+	} else {
+		slog.Info("Successfully stopped Docker containers.")
+	}
+}
+
 func main() {
 	logger.Init("pi-controller")
 	slog.Info("Starting pi-controller...")
@@ -99,6 +111,8 @@ func main() {
 	checkDocker()
 
 	checkAndReplaceSplash()
+
+	stopContainers()
 
 	// Main application loop
 	// For now, it just simulates the pi-controller running

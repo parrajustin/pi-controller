@@ -3,11 +3,12 @@ package main
 import (
 	"fmt"
 	"log/slog"
-	"github.com/parrajustin/pi-controller/pkg/logger"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/parrajustin/pi-controller/pkg/logger"
 )
 
 const (
@@ -64,12 +65,12 @@ func runPiControllerLoop() {
 		cmd := exec.Command("./pi-controller")
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		
+
 		err := cmd.Run()
 		if err != nil {
 			logger.Fatalf("pi-controller failed: %v. Failing runner as well.", err)
 		}
-		slog.Info(fmt.Sprintf("pi-controller exited without error. Restarting in 5 seconds..."))
+		slog.Info("pi-controller exited without error. Restarting in 5 seconds...")
 		time.Sleep(5 * time.Second)
 	}
 }
@@ -89,15 +90,15 @@ func pollUpdates() {
 // checkForUpdate runs the updater binary and returns true if an update folder was created.
 func checkForUpdate() bool {
 	slog.Info("Running updater to check for new releases...")
-	
+
 	cmd := exec.Command("./updater")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	// We ignore the error here because we only care if the update folder was successfully created.
 	// The updater binary itself will log any errors it encounters.
 	_ = cmd.Run()
-	
+
 	if _, err := os.Stat(updateDir); err == nil {
 		return true
 	}
