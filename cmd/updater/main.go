@@ -11,7 +11,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
+	"github.com/parrajustin/pi-controller/pkg/logger"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -49,34 +50,35 @@ func getArchiveName() string {
 }
 
 func main() {
+	logger.Init("updater")
 	if _, err := os.Stat(publicKeyFile); os.IsNotExist(err) {
-		log.Fatalf("Fatal: %s is missing from the directory", publicKeyFile)
+		logger.Fatalf("Fatal: %s is missing from the directory", publicKeyFile)
 	}
 
-	log.Println("Updater started. Checking for new releases...")
+	slog.Info("Updater started. Checking for new releases...")
 
 	currentVersion, err := getCurrentVersion()
 	if err != nil {
-		log.Fatalf("Error reading current version: %v", err)
+		logger.Fatalf("Error reading current version: %v", err)
 	}
 
 	latestRelease, err := getLatestRelease()
 	if err != nil {
-		log.Fatalf("Error fetching latest release: %v", err)
+		logger.Fatalf("Error fetching latest release: %v", err)
 	}
 
 	if semver.Compare(latestRelease.TagName, currentVersion) <= 0 {
-		log.Printf("Already up-to-date (current: %s, latest: %s). Exiting.", currentVersion, latestRelease.TagName)
+		slog.Info(fmt.Sprintf("Already up-to-date (current: %s, latest: %s). Exiting.", currentVersion, latestRelease.TagName))
 		return
 	}
 
-	log.Printf("New version found: %s (current: %s). Starting download...", latestRelease.TagName, currentVersion)
+	slog.Info(fmt.Sprintf("New version found: %s (current: %s). Starting download...", latestRelease.TagName, currentVersion))
 
 	if err := runUpdate(latestRelease.TagName); err != nil {
-		log.Fatalf("Update failed: %v", err)
+		logger.Fatalf("Update failed: %v", err)
 	}
 
-	log.Println("Update downloaded and validated successfully!")
+	slog.Info("Update downloaded and validated successfully!")
 }
 
 func getCurrentVersion() (string, error) {
@@ -136,17 +138,17 @@ func runUpdate(version string) error {
 	archivePath := filepath.Join(downloadDir, archiveName)
 	sigPath := filepath.Join(downloadDir, signatureName)
 
-	log.Println("Downloading archive...")
+	slog.Info("Downloading archive...")
 	if err := downloadFile(fmt.Sprintf(downloadURLTemplate, version, archiveName), archivePath); err != nil {
 		return fmt.Errorf("failed to download archive: %w", err)
 	}
 
-	log.Println("Downloading signature...")
+	slog.Info("Downloading signature...")
 	if err := downloadFile(fmt.Sprintf(downloadURLTemplate, version, signatureName), sigPath); err != nil {
 		return fmt.Errorf("failed to download signature: %w", err)
 	}
 
-	log.Println("Verifying signature...")
+	slog.Info("Verifying signature...")
 	if err := verifySignature(archivePath, sigPath, publicKeyFile); err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
 	}
@@ -156,7 +158,7 @@ func runUpdate(version string) error {
 		return fmt.Errorf("failed to create update dir: %w", err)
 	}
 
-	log.Println("Extracting new files to update folder...")
+	slog.Info("Extracting new files to update folder...")
 	if err := extractTarGz(archivePath, updateDir); err != nil {
 		return fmt.Errorf("failed to extract new files: %w", err)
 	}
@@ -171,7 +173,7 @@ func downloadFile(url, dest string) error {
 		if err == nil {
 			return nil
 		}
-		log.Printf("Download failed (attempt %d/3): %v", i+1, err)
+		slog.Error(fmt.Sprintf("Download failed (attempt %d/3): %v", i+1, err))
 		time.Sleep(2 * time.Second)
 	}
 	return err

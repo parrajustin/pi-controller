@@ -34,3 +34,8 @@ go.work.sum
 dist/*
 test
 privatekey.pem
+
+# Ignore test binaries
+cmd/pi-controller/pi-controller
+cmd/runner/runner
+cmd/updater/updater
