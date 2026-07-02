@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xinit \
     unclutter \
     cec-utils \
+    matchbox-window-manager \
     && rm -rf /var/lib/apt/lists/*
 
 COPY start.sh /start.sh
