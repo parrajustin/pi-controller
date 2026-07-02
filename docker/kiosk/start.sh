@@ -108,7 +108,7 @@ launch_chrome "0.0" "\$LAUNCH_URL" "/tmp/chromium-dsi" "--force-device-scale-fac
 # If we found multiple cards (like the HDMI on card2), launch on the second display!
 if [ "$NUM_CARDS" -ge 2 ]; then
     # HDMI is 4K, force 3x scaling so text is readable
-    launch_chrome "0.1" "\$LAUNCH_URL_HDMI" "/tmp/chromium-hdmi" "--force-device-scale-factor=3"
+    launch_chrome "0.1" "\$LAUNCH_URL_HDMI" "/tmp/chromium-hdmi" "--force-device-scale-factor=2.5 --remote-debugging-port=9222 --remote-allow-origins=*"
 fi
 
 # Wait for background processes so X doesn't exit immediately
