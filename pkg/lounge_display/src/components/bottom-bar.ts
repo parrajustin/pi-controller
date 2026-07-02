@@ -264,25 +264,6 @@ export class BottomBar extends LitElement {
           </div>
 
           <icon-button>
-            <!-- Video Icon -->
-            <svg viewBox="0 0 24 24">
-              <path
-                d="M17 10.5V7C17 5.9 16.1 5 15 5H4C2.9 5 2 5.9 2 7V17C2 18.1 2.9 19 4 19H15C16.1 19 17 18.1 17 17V13.5L21 17.5V6.5L17 10.5ZM15 17H4V7H15V17Z"
-              />
-              <path d="M8 14H11V11H14V8H11V5H8V8H5V11H8V14Z" fill="#a8c7fa" />
-            </svg>
-          </icon-button>
-
-          <icon-button>
-            <!-- Present Icon -->
-            <svg viewBox="0 0 24 24">
-              <path
-                d="M21 3H3C1.9 3 1 3.9 1 5V19C1 20.1 1.9 21 3 21H21C22.1 21 23 20.1 23 19V5C23 3.9 22.1 3 21 3ZM21 19H3V5H21V19ZM8 17H16V15H8V17ZM12 7L8 11H11V14H13V11H16L12 7Z"
-              />
-            </svg>
-          </icon-button>
-
-          <icon-button>
             <!-- More Icon -->
             <svg viewBox="0 0 24 24">
               <path

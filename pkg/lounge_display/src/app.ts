@@ -4,6 +4,7 @@ import { Meeting } from './components/meeting-entry.js';
 import './components/meeting-list.js';
 import './components/bottom-bar.js';
 import splashImg from '../splash.png';
+import { parse, isWithinInterval, format, addSeconds } from 'date-fns';
 
 @customElement('lounge-display')
 export class LoungeDisplay extends LitElement {
@@ -57,15 +58,69 @@ export class LoungeDisplay extends LitElement {
     }
   `;
 
+  @state() private currentTime = new Date();
+  private timer?: ReturnType<typeof setInterval>;
+
   @state()
   private meetings: Meeting[] = [
-    { time: '10:00 AM', name: 'Team Meeting', status: 'Now', isActive: true },
-    { time: '1:00 PM', name: 'Mobile Team Retro', status: '', isActive: false },
-    { time: '2:00 PM', name: 'Launch party!', status: '', isActive: false },
-    { time: '4:00 PM', name: 'Illustration Review', status: '', isActive: false },
+    { time: '10:30 AM', lengthInSeconds: 1800, name: 'Design Sync', status: '', isActive: false },
+    { time: '11:30 AM', lengthInSeconds: 1800, name: 'Mobile Team Retro', status: '', isActive: false },
+    { time: '2:00 PM', lengthInSeconds: 3600, name: 'Launch party!', status: '', isActive: false },
+    { time: '4:00 PM', lengthInSeconds: 3600, name: 'Illustration Review', status: '', isActive: false },
   ];
 
+  connectedCallback() {
+    super.connectedCallback();
+    this.updateMeetings();
+    this.timer = setInterval(() => {
+      this.currentTime = new Date();
+      this.updateMeetings();
+    }, 1000);
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this.timer) {
+      clearInterval(this.timer);
+    }
+  }
+
+  private updateMeetings() {
+    let changed = false;
+    const now = new Date();
+    const updated = this.meetings.map(m => {
+      const start = parse(m.time, 'h:mm a', now);
+      const end = addSeconds(start, m.lengthInSeconds);
+      const isActive = isWithinInterval(this.currentTime, { start, end });
+      const status = isActive ? 'Now' : '';
+      if (m.isActive !== isActive || m.status !== status) {
+        changed = true;
+        return { ...m, isActive, status };
+      }
+      return m;
+    });
+    if (changed) {
+      this.meetings = updated;
+    }
+  }
+
   render() {
+    const headerTimeStr = `${format(this.currentTime, 'h:mm a')} • ${format(this.currentTime, 'E, MMM d')}`;
+
+    const now = new Date();
+    let firstFutureOrActiveIndex = this.meetings.findIndex(m => {
+      const start = parse(m.time, 'h:mm a', now);
+      const end = addSeconds(start, m.lengthInSeconds);
+      return end > this.currentTime;
+    });
+
+    if (firstFutureOrActiveIndex === -1) {
+      firstFutureOrActiveIndex = this.meetings.length;
+    }
+
+    const startIndex = Math.max(0, firstFutureOrActiveIndex - 1);
+    const displayedMeetings = this.meetings.slice(startIndex);
+
     return html`
       <div class="header">
         <div class="header-left">
@@ -74,10 +129,10 @@ export class LoungeDisplay extends LitElement {
           </div>
           <div class="header-title">Mountain View De Anza no 194 Lodge Display</div>
         </div>
-        <div class="header-time">10:00 AM • Mon, July 7</div>
+        <div class="header-time">${headerTimeStr}</div>
       </div>
 
-      <meeting-list .meetings=${this.meetings}></meeting-list>
+      <meeting-list .meetings=${displayedMeetings}></meeting-list>
 
       <bottom-bar></bottom-bar>
     `;

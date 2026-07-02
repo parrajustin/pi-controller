@@ -9,8 +9,11 @@ importers:
   .:
     dependencies:
       '@material/web':
-        specifier: ^2.4.1
+        specifier: 2.4.1
         version: 2.4.1
+      date-fns:
+        specifier: ^4.4.0
+        version: 4.4.0
       lit:
         specifier: 3.3.3
         version: 3.3.3
@@ -595,6 +598,9 @@ packages:
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
     engines: {node: '>= 8'}
+
+  date-fns@4.4.0:
+    resolution: {integrity: sha512-+1UMbeh68lH1SegH83CGWwpb6OHHbpSgr3+s5Eww5M4CAgswBpoWS0AjTOfEJ33HiYKz1hdj/KTFprzXHmq/6w==}
 
   debug@2.6.9:
     resolution: {integrity: sha512-bC7ElrdJaJnPbAP+1EotYvqZsb3ecl5wi6Bfi6BJTUcNowp6cvspg0jXznRTKDjm/E7AdgFBVeAPVMNcKGsHMA==}
@@ -2489,6 +2495,8 @@ snapshots:
       path-key: 3.1.1
       shebang-command: 2.0.0
       which: 2.0.2
+
+  date-fns@4.4.0: {}
 
   debug@2.6.9:
     dependencies:

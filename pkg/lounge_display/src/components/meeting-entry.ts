@@ -4,6 +4,7 @@ import '@material/web/ripple/ripple.js';
 
 export interface Meeting {
   time: string;
+  lengthInSeconds: number;
   name: string;
   status: string;
   isActive: boolean;
