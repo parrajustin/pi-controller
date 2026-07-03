@@ -4,7 +4,7 @@
 set -e
 
 echo "Building the docker image..."
-docker build -t lounge_display .
+docker build -t lounge_display --build-context token_receiver=../token_receiver .
 
 HOST_IP=$(ip -4 route get 8.8.8.8 2>/dev/null | awk '{print $7}' | tr -d '\n')
 if [ -z "$HOST_IP" ]; then

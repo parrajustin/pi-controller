@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -10,7 +11,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -66,6 +69,61 @@ var setupReady bool
 
 type tokenPayload struct {
 	Code string `json:"code"`
+}
+
+// runReceiver spawns the receiver binary and returns the extracted ticket.
+// It also starts a goroutine to read the received code and send it to authCodeChan.
+func runReceiver(binPath string) (string, error) {
+	cmd := exec.Command(binPath)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", err
+	}
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	var ticket string
+
+	// Read until we find the ticket
+	for scanner.Scan() {
+		line := scanner.Text()
+		fmt.Println("[receiver]", line)
+		if strings.HasPrefix(line, "Ticket: ") {
+			ticket = strings.TrimSpace(strings.TrimPrefix(line, "Ticket: "))
+			break
+		}
+	}
+
+	if ticket == "" {
+		return "", fmt.Errorf("failed to extract ticket from receiver")
+	}
+
+	// Continue reading for the code in a goroutine
+	go func() {
+		defer cmd.Wait()
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Println("[receiver]", line)
+			if strings.HasPrefix(line, "RECEIVED CODE: ") {
+				code := strings.TrimSpace(strings.TrimPrefix(line, "RECEIVED CODE: "))
+				authCodeChan <- code
+				return // we can stop reading
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			fmt.Println("[receiver] error reading stdout:", err)
+		}
+	}()
+
+	if err := scanner.Err(); err != nil {
+		return ticket, fmt.Errorf("error reading receiver stdout: %v", err)
+	}
+
+	return ticket, nil
 }
 
 func startHTTPServer(dir, port string) {
@@ -139,7 +197,7 @@ func startHTTPServer(dir, port string) {
 		}
 		tokPath := filepath.Join(oauthDir, "token.json")
 		hasAuth := false
-		
+
 		if f, err := os.Open(tokPath); err == nil {
 			defer f.Close()
 			tok := &oauth2.Token{}
@@ -147,7 +205,7 @@ func startHTTPServer(dir, port string) {
 				hasAuth = true
 			}
 		}
-		
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"hasAuth": hasAuth})
 	})
@@ -221,6 +279,7 @@ func startHTTPServer(dir, port string) {
 func main() {
 	dirFlag := flag.String("dir", "startup", "the directory to serve")
 	portFlag := flag.String("port", "8080", "the port to listen on")
+	receiverFlag := flag.String("receiver", "/app/receiver", "the path to the receiver binary")
 	flag.Parse()
 
 	dir, err := filepath.Abs(*dirFlag)
@@ -274,12 +333,18 @@ func main() {
 		}
 		fmt.Println("Saved credentials.json")
 	}
+	// Dynamically set the redirect URI
+	baseURL := os.Getenv("OAUTH_REDIRECT_URL")
+	if baseURL == "" {
+		log.Fatalf("Env OAUTH_REDIRECT_URL is required.")
+	}
 
-	// Dynamically set the redirect URI so Google routes back to our server
-	// We MUST use localhost (or 127.0.0.1) because Google OAuth restricts
-	// private IPs for redirect_uri.
-	config.RedirectURL = fmt.Sprintf("http://localhost:%s/api/token", *portFlag)
+	ticket, err := runReceiver(*receiverFlag)
+	if err != nil {
+		log.Fatalf("Failed to run receiver: %v", err)
+	}
 
+	config.RedirectURL = fmt.Sprintf("%s/auth/%s", strings.TrimRight(baseURL, "/"), ticket)
 	ctx := context.Background()
 	var tok *oauth2.Token
 
@@ -294,12 +359,12 @@ func main() {
 
 	if tok == nil {
 		// Ask for an auth code dynamically via API
-		authURLStr = config.AuthCodeURL("state-token", 
+		authURLStr = config.AuthCodeURL("state-token",
 			oauth2.AccessTypeOffline,
 			oauth2.SetAuthURLParam("device_id", "lounge-display"),
 			oauth2.SetAuthURLParam("device_name", "Lounge Display"),
 		)
-		fmt.Printf("Authorization URL generated. Waiting for auth code on /api/token...\n")
+		fmt.Printf("Authorization URL generated: %s\nWaiting for auth code on /api/token or via receiver...\n", authURLStr)
 
 		authCode := <-authCodeChan
 		tok, err = config.Exchange(ctx, authCode)

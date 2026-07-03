@@ -45,12 +45,23 @@ COPY setup_server/main.go .
 RUN go mod init setup_server && go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o setup_server main.go
 
-# Stage 6: Final image
+# Stage 6: Build token_receiver Rust binary
+FROM rust:slim AS rust_builder
+WORKDIR /app
+# We use an additional build context for token_receiver
+COPY --from=token_receiver . ./token_receiver/
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/token_receiver/target \
+    cd token_receiver && cargo build --release --bin receiver && \
+    cp target/release/receiver /app/receiver
+
+# Stage 7: Final image
 FROM debian:12-slim
 WORKDIR /oauth
 WORKDIR /app
 
 ENV OAUTH_DIR="/oauth"
+ENV OAUTH_REDIRECT_URL="http://localhost:7070/auth"
 
 # Install ca-certificates required for OAuth / Google APIs over HTTPS
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -58,6 +69,9 @@ RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/
 # Copy the go binaries
 COPY --from=display_go_builder /app/display_server /app/display_server
 COPY --from=setup_go_builder /app/setup_server /app/setup_server
+
+# Copy the rust binary
+COPY --from=rust_builder /app/receiver /app/receiver
 
 # Copy start script
 COPY start.sh /app/start.sh
