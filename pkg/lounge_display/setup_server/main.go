@@ -127,6 +127,31 @@ func startHTTPServer(dir, port string) {
 		json.NewEncoder(w).Encode(map[string]bool{"hasCreds": hasCred})
 	})
 
+	// /api/has_auth endpoint
+	mux.HandleFunc("/api/has_auth", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		oauthDir := os.Getenv("OAUTH_DIR")
+		if oauthDir == "" {
+			oauthDir = "."
+		}
+		tokPath := filepath.Join(oauthDir, "token.json")
+		hasAuth := false
+		
+		if f, err := os.Open(tokPath); err == nil {
+			defer f.Close()
+			tok := &oauth2.Token{}
+			if err := json.NewDecoder(f).Decode(tok); err == nil && tok.AccessToken != "" {
+				hasAuth = true
+			}
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"hasAuth": hasAuth})
+	})
+
 	// /api/cred endpoint
 	mux.HandleFunc("/api/cred", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -251,11 +276,9 @@ func main() {
 	}
 
 	// Dynamically set the redirect URI so Google routes back to our server
-	localIP := getLocalIP()
-	if localIP == "" {
-		localIP = "localhost"
-	}
-	config.RedirectURL = fmt.Sprintf("http://%s:%s/api/token", localIP, *portFlag)
+	// We MUST use localhost (or 127.0.0.1) because Google OAuth restricts
+	// private IPs for redirect_uri.
+	config.RedirectURL = fmt.Sprintf("http://localhost:%s/api/token", *portFlag)
 
 	ctx := context.Background()
 	var tok *oauth2.Token
@@ -271,7 +294,11 @@ func main() {
 
 	if tok == nil {
 		// Ask for an auth code dynamically via API
-		authURLStr = config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+		authURLStr = config.AuthCodeURL("state-token", 
+			oauth2.AccessTypeOffline,
+			oauth2.SetAuthURLParam("device_id", "lounge-display"),
+			oauth2.SetAuthURLParam("device_name", "Lounge Display"),
+		)
 		fmt.Printf("Authorization URL generated. Waiting for auth code on /api/token...\n")
 
 		authCode := <-authCodeChan

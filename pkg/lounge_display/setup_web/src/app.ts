@@ -2,6 +2,8 @@ import { LitElement, html, css, TemplateResult } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import '@material/web/progress/linear-progress.js';
 import '@material/web/checkbox/checkbox.js';
+import '@material/web/textfield/outlined-text-field.js';
+import '@material/web/button/filled-button.js';
 import splashImg from '../splash.png';
 import { WrapPromise } from 'standard-ts-lib/src/wrap_promise.js';
 import QRCode from 'qrcode';
@@ -202,6 +204,36 @@ export class SetupDisplay extends LitElement {
     }, 1200);
   }
 
+  private async handleTokenSubmit() {
+    if (!this.shadowRoot) return;
+    const input = this.shadowRoot.querySelector('#token-input') as HTMLInputElement;
+    if (!input || !input.value) return;
+
+    let code = input.value;
+    try {
+      const url = new URL(input.value);
+      const codeParam = url.searchParams.get('code');
+      if (codeParam) {
+        code = codeParam;
+      }
+    } catch (e) {
+      // Not a URL, treat as raw code
+    }
+
+    const res = await WrapPromise(fetch('/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code })
+    }), 'Failed to post token');
+
+    if (res.ok && res.safeUnwrap().ok) {
+      input.value = '';
+      this.statusPageText = 'Token submitted, verifying...';
+    } else {
+      alert('Failed to submit token');
+    }
+  }
+
   // --- State Machine Polling ---
 
   private async startPolling() {
@@ -224,7 +256,7 @@ export class SetupDisplay extends LitElement {
         if (passed) {
           this.stage = 3;
           this.isLoading = true;
-          this.statusPageText = 'STAGE 3 PLACEHOLDER';
+          this.statusPageText = 'Checking for auth token';
           this.extraHtml = undefined;
           continue;
         } else {
@@ -268,13 +300,65 @@ export class SetupDisplay extends LitElement {
           }
         }
       } else if (this.stage === 3) {
-        const passed = await this.checkStage3();
-        if (passed) {
-          this.allClear = true;
-          setTimeout(() => {
-            window.location.href = '/';
-          }, 1500);
-          break;
+        const hasAuth = await this.checkStage3();
+        if (hasAuth) {
+          this.isLoading = true;
+          this.statusPageText = 'Finalizing setup...';
+          this.extraHtml = undefined;
+          
+          const isReady = await this.checkStage3Ready();
+          if (isReady) {
+            this.allClear = true;
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 1500);
+            break;
+          }
+        } else {
+          this.isLoading = false;
+          this.statusPageText = 'Authorize the display';
+          
+          const authUrlRes = await WrapPromise(fetch('/api/auth_url'), 'Failed to fetch auth url');
+          if (authUrlRes.ok && authUrlRes.safeUnwrap().ok) {
+            const authUrlData = await WrapPromise(authUrlRes.safeUnwrap().json(), 'Failed to parse auth url json');
+            if (authUrlData.ok && authUrlData.safeUnwrap().url) {
+              const url = authUrlData.safeUnwrap().url;
+              if (url) {
+                if (!this.extraHtml) {
+                  const qrRes = await WrapPromise(QRCode.toDataURL(url, {
+                    margin: 2,
+                    width: 180,
+                    color: {
+                      dark: '#000000',
+                      light: '#ffffff'
+                    }
+                  }), 'failed to generate qr');
+        
+                  if (qrRes.ok) {
+                    this.extraHtml = html`
+                      <div style="display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 8px; margin-top: 8px; flex-grow: 1; min-height: 0; overflow-y: auto;">
+                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+                          <img src="${qrRes.safeUnwrap()}" alt="QR Code for Auth URL" style="border-radius: 8px; max-height: 150px; min-height: 0; object-fit: contain;" />
+                          <a href="${url}" target="_blank" style="color: #a8c7fa; text-decoration: none; word-break: break-all; text-align: center; font-size: 0.9rem; flex-shrink: 0;">Open Auth URL</a>
+                        </div>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary, #9aa0a6); margin-top: 4px; text-wrap: wrap;">
+                          Google may redirect to a broken 'localhost' page. Copy that full URL and paste it below:
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                          <md-outlined-text-field id="token-input" label="Paste URL or Code" style="flex-grow: 1;"></md-outlined-text-field>
+                          <md-filled-button @click=${this.handleTokenSubmit}>Submit</md-filled-button>
+                        </div>
+                      </div>
+                    `;
+                  }
+                }
+              } else {
+                this.isLoading = true;
+                this.statusPageText = 'Generating Auth URL...';
+                this.extraHtml = undefined;
+              }
+            }
+          }
         }
       }
       
@@ -303,6 +387,16 @@ export class SetupDisplay extends LitElement {
   }
 
   private async checkStage3(): Promise<boolean> {
+    const res = await WrapPromise(fetch('/api/has_auth'), 'failed fetch');
+    if (!res.ok || !res.safeUnwrap().ok) return false;
+    
+    const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
+    if (!dataRes.ok || !dataRes.safeUnwrap().hasAuth) return false;
+    
+    return true;
+  }
+
+  private async checkStage3Ready(): Promise<boolean> {
     const res = await WrapPromise(fetch('/api/status'), 'failed fetch');
     if (!res.ok || !res.safeUnwrap().ok) return false;
     
