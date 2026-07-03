@@ -4,6 +4,8 @@ import '@material/web/icon/icon.js';
 import '@material/web/iconbutton/icon-button.js';
 import '@material/web/divider/divider.js';
 
+declare const MEETING_URL: string | undefined;
+
 @customElement('display-control-app')
 export class DisplayControlApp extends LitElement {
   @state()
@@ -177,7 +179,7 @@ export class DisplayControlApp extends LitElement {
           </div>
         </div>
         <div class="main-content">
-          <iframe src="http://localhost:8080" allow="camera; microphone; display-capture; fullscreen"></iframe>
+          <iframe src=${typeof MEETING_URL !== 'undefined' ? MEETING_URL : 'http://localhost:8080'} allow="camera; microphone; display-capture; fullscreen"></iframe>
         </div>
       </div>
     `;

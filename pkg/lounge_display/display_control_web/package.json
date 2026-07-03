@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "esbuild src/app.ts --bundle --outfile=dist/bundle.js --loader:.png=file --public-path=dist",
+    "build-prod": "esbuild src/app.ts --bundle --outfile=dist/bundle.js --loader:.png=file --public-path=dist --define:MEETING_URL=\"'http://localhost:8080/meeting_control_web'\"",
     "watch": "esbuild src/app.ts --bundle --outfile=dist/bundle.js --watch --loader:.png=file --public-path=dist",
     "dev": "concurrently \"pnpm run watch\" \"live-server --port=9090\"",
     "lint": "eslint src/**/*.ts",
