@@ -6,5 +6,15 @@ set -e
 echo "Building the docker image..."
 docker build -t lounge_display .
 
-echo "Starting the container on port 8080..."
-docker run --rm -p 8080:8080 lounge_display
+HOST_IP=$(ip -4 route get 8.8.8.8 2>/dev/null | awk '{print $7}' | tr -d '\n')
+if [ -z "$HOST_IP" ]; then
+    HOST_IP="127.0.0.1"
+fi
+
+echo "Detected Host IP: $HOST_IP"
+
+# Ensure the oauth_test directory exists before mounting so it's not created as root
+mkdir -p oauth_test
+
+echo "Starting the container on port 8080 with /oauth volume mounted..."
+docker run --rm -p 8080:8080 -e HOST_IP="$HOST_IP" -v "$(pwd)/oauth_test:/oauth" lounge_display

@@ -1,0 +1,49 @@
+# Lounge Display - Architecture & Developer Guide
+
+This directory (`pkg/lounge_display`) contains the entire software stack for the Lounge Display device, integrating both frontend web applications and backend Go servers into a single orchestratable unit.
+
+## System Architecture & Process Flow
+
+The system is designed to run inside a single Docker container to simplify deployment, but internally it orchestrates multiple applications to achieve its goal:
+
+1. **Initial Setup (OAuth Flow)**:
+   - When the container starts (via `start.sh`), it first launches the **`setup_server`**.
+   - The `setup_server` listens on port `8080` and serves the **`setup_web`** frontend.
+   - This setup phase ensures the device has internet access and guides the user through authenticating with Google Calendar to generate `credentials.json` and `token.json`.
+   - Once the OAuth token is successfully fetched and verified, `setup_server` safely exits.
+
+2. **Main Display Application**:
+   - After `setup_server` finishes, `start.sh` immediately hands over execution to the **`display_server`**.
+   - The `display_server` serves the primary frontend (**`display_control_web`** and **`meeting_control_web`**) on port `8080` and acts as the backend API, utilizing the generated tokens to interact with Google APIs.
+
+### Sub-Components
+
+For detailed documentation on the individual components, please refer to their respective `GEMINI.md` guides:
+
+* [meeting_control_web/GEMINI.MD](meeting_control_web/GEMINI.MD) - The frontend interface for controlling meetings.
+* [setup_web/GEMINI.md](setup_web/GEMINI.md) - The frontend interface for the initial device setup and OAuth flow.
+* [setup_server/GEMINI.md](setup_server/GEMINI.md) - The Go backend responsible for obtaining Google OAuth tokens.
+
+*(Note: `display_server` and `display_control_web` are the other core components but currently lack dedicated GEMINI guides).*
+
+## How to Run
+
+To build and run the complete system locally, use the provided `run.sh` script:
+
+```bash
+cd pkg/lounge_display
+./run.sh
+```
+
+This script automates the following process:
+1. **Host IP Detection**: It determines your machine's true Local IP Address (e.g., `192.168.1.100`) by querying your active routing table.
+2. **Builds the Docker Image**: Builds the multi-stage `Dockerfile`, compiling all frontends and Go binaries into a single production image.
+3. **Starts the Container**: Runs the resulting image, mapping port `8080` and passing in the detected `HOST_IP`.
+
+### The Importance of the `HOST_IP` Environment Variable
+
+When running this container (especially on systems using Docker Desktop), the container is often placed on an isolated virtual machine network (e.g., `192.168.65.x`). 
+
+However, during the Google OAuth flow, the `setup_server` needs to generate an authorization URL with a specific `redirect_uri` that points back to the device. If the server uses the Docker VM IP, the OAuth flow will fail because your browser cannot reach `192.168.65.x`.
+
+To resolve this, the Docker container **requires** the `HOST_IP` environment variable to be set to your actual network IP (e.g., `192.168.1.100`). The `setup_server` explicitly reads this variable to construct a functional `redirect_uri` that your browser and Google can use to return the authorization token. The `run.sh` script handles this injection automatically.

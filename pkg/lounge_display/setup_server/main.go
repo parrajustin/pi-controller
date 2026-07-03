@@ -41,6 +41,9 @@ func applyHeaders(h http.Handler) http.Handler {
 
 // getLocalIP returns the local IPv4 address of the host machine.
 func getLocalIP() string {
+	if hostIP := os.Getenv("HOST_IP"); hostIP != "" {
+		return hostIP
+	}
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
 		return ""
@@ -98,6 +101,30 @@ func startHTTPServer(dir, port string) {
 			status = "ready"
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": status})
+	})
+
+	// /api/has_wifi endpoint
+	mux.HandleFunc("/api/has_wifi", func(w http.ResponseWriter, r *http.Request) {
+		client := http.Client{Timeout: 3 * time.Second}
+		_, err := client.Get("https://google.com")
+		access := err == nil
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"internetAccess": access})
+	})
+
+	// /api/has_cred endpoint
+	mux.HandleFunc("/api/has_cred", func(w http.ResponseWriter, r *http.Request) {
+		oauthDir := os.Getenv("OAUTH_DIR")
+		if oauthDir == "" {
+			oauthDir = "."
+		}
+		credPath := filepath.Join(oauthDir, "credentials.json")
+		hasCred := false
+		if _, err := os.Stat(credPath); err == nil {
+			hasCred = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"hasCreds": hasCred})
 	})
 
 	// /api/cred endpoint

@@ -47,7 +47,10 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o setup_server main
 
 # Stage 6: Final image
 FROM debian:12-slim
+WORKDIR /oauth
 WORKDIR /app
+
+ENV OAUTH_DIR="/oauth"
 
 # Install ca-certificates required for OAuth / Google APIs over HTTPS
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
