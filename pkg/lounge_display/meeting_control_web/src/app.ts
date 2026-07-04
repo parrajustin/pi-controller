@@ -4,7 +4,16 @@ import { Meeting } from './components/meeting-entry.js';
 import './components/meeting-list.js';
 import './components/bottom-bar.js';
 import splashImg from '../splash.png';
-import { parse, isWithinInterval, format, addSeconds } from 'date-fns';
+import { parse, isWithinInterval, format, addSeconds, parseISO } from 'date-fns';
+
+interface EventInfo {
+  name: string;
+  startTime: string;
+  endTime: string;
+  acceptedStatus: string;
+  description: string;
+  meetLink: string;
+}
 
 @customElement('lounge-display')
 export class LoungeDisplay extends LitElement {
@@ -62,16 +71,58 @@ export class LoungeDisplay extends LitElement {
   private timer?: ReturnType<typeof setInterval>;
 
   @state()
-  private meetings: Meeting[] = [
-    { time: '10:30 AM', lengthInSeconds: 1800, name: 'Design Sync', status: '', isActive: false },
-    { time: '11:30 AM', lengthInSeconds: 1800, name: 'Mobile Team Retro', status: '', isActive: false },
-    { time: '2:00 PM', lengthInSeconds: 3600, name: 'Launch party!', status: '', isActive: false },
-    { time: '4:00 PM', lengthInSeconds: 3600, name: 'Illustration Review', status: '', isActive: false },
-  ];
+  private meetings: Meeting[] = [];
+
+  private fetchTimer?: ReturnType<typeof setInterval>;
+  private fetchTimeout?: ReturnType<typeof setTimeout>;
+
+  private async fetchCalendarEvents() {
+    try {
+      const response = await fetch('/api/calendar_events');
+      if (!response.ok) throw new Error('Network error');
+      const events: EventInfo[] = await response.json();
+      
+      if (!events) {
+          this.meetings = [];
+          this.updateMeetings();
+          return;
+      }
+      
+      const newMeetings = events.map(e => {
+        const start = parseISO(e.startTime);
+        const end = parseISO(e.endTime);
+        const lengthInSeconds = (end.getTime() - start.getTime()) / 1000;
+        
+        return {
+          time: format(start, 'h:mm a'),
+          lengthInSeconds: Math.max(0, lengthInSeconds),
+          name: e.name,
+          status: '', 
+          isActive: false, 
+        };
+      });
+      this.meetings = newMeetings;
+      this.updateMeetings();
+    } catch (e) {
+      console.error("Failed to fetch calendar events", e);
+    }
+  }
 
   connectedCallback() {
     super.connectedCallback();
-    this.updateMeetings();
+    this.fetchCalendarEvents();
+    
+    // Top-of-minute syncing for fetch
+    const now = new Date();
+    const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+    
+    this.fetchTimeout = setTimeout(() => {
+      this.fetchCalendarEvents();
+      this.fetchTimer = setInterval(() => {
+        this.fetchCalendarEvents();
+      }, 60000);
+    }, msUntilNextMinute);
+
     this.timer = setInterval(() => {
       this.currentTime = new Date();
       this.updateMeetings();
@@ -82,6 +133,12 @@ export class LoungeDisplay extends LitElement {
     super.disconnectedCallback();
     if (this.timer) {
       clearInterval(this.timer);
+    }
+    if (this.fetchTimeout) {
+      clearTimeout(this.fetchTimeout);
+    }
+    if (this.fetchTimer) {
+      clearInterval(this.fetchTimer);
     }
   }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,9 +9,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/cryptoutil"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/calendar/v3"
+	"google.golang.org/api/option"
 )
 
 // applyHeaders adds headers to fix CORS and CSP (Content Security Policy) issues.
@@ -63,21 +68,101 @@ func loadAuth(oauthDir string) (*oauth2.Token, error) {
 	return tok, nil
 }
 
+type EventInfo struct {
+	Name        string `json:"name"`
+	StartTime   string `json:"startTime"`
+	EndTime     string `json:"endTime"`
+	Accepted    string `json:"acceptedStatus"`
+	Description string `json:"description"`
+	MeetLink    string `json:"meetLink"`
+}
+
+func fetchCalendarEvents(srv *calendar.Service) ([]EventInfo, error) {
+	t := time.Now().Add(-15 * time.Minute).Format(time.RFC3339)
+	events, err := srv.Events.List("primary").ShowDeleted(false).
+		SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
+	if err != nil {
+		return nil, err
+	}
+
+	var results []EventInfo
+	for _, item := range events.Items {
+		startDate := item.Start.DateTime
+		if startDate == "" {
+			startDate = item.Start.Date
+		}
+		endDate := ""
+		if item.End != nil {
+			endDate = item.End.DateTime
+			if endDate == "" {
+				endDate = item.End.Date
+			}
+		}
+
+		acceptedStatus := "unknown"
+		for _, attendee := range item.Attendees {
+			if attendee.Self {
+				acceptedStatus = attendee.ResponseStatus
+				break
+			}
+		}
+		if len(item.Attendees) == 0 {
+			acceptedStatus = "accepted"
+		}
+
+		if acceptedStatus == "declined" {
+			continue
+		}
+
+		results = append(results, EventInfo{
+			Name:        item.Summary,
+			StartTime:   startDate,
+			EndTime:     endDate,
+			Accepted:    acceptedStatus,
+			Description: item.Description,
+			MeetLink:    item.HangoutLink,
+		})
+	}
+	return results, nil
+}
+
 func main() {
 	dirFlag := flag.String("dir", ".", "the directory to serve")
 	portFlag := flag.String("port", "8080", "the port to listen on")
 	flag.Parse()
 
-	// Example usage of token decryption
 	oauthDir := os.Getenv("OAUTH_DIR")
 	if oauthDir == "" {
 		oauthDir = "."
 	}
 	tok, err := loadAuth(oauthDir)
 	if err != nil {
-		fmt.Printf("Warning: failed to load auth token: %v\n", err)
-	} else {
-		fmt.Printf("Successfully decrypted auth token for display server usage (valid=%v)\n", tok.Valid())
+		log.Fatalf("Failed to load auth token: %v", err)
+	}
+
+	fmt.Printf("Successfully decrypted auth token for display server usage (valid=%v)\n", tok.Valid())
+
+	credPath := filepath.Join(oauthDir, "credentials.json")
+	credBytes, err := os.ReadFile(credPath)
+	if err != nil {
+		log.Fatalf("Unable to read credentials file: %v", err)
+	}
+	config, err := google.ConfigFromJSON(credBytes, calendar.CalendarReadonlyScope)
+	if err != nil {
+		log.Fatalf("Unable to parse client secret file to config: %v", err)
+	}
+
+	ctx := context.Background()
+	client := config.Client(ctx, tok)
+	srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
+	if err != nil {
+		log.Fatalf("Unable to retrieve Calendar client: %v", err)
+	}
+
+	// Fail if we can't fetch test calendar events
+	_, err = fetchCalendarEvents(srv)
+	if err != nil {
+		log.Fatalf("Failed to fetch initial calendar events: %v", err)
 	}
 
 	dir, err := filepath.Abs(*dirFlag)
@@ -91,11 +176,24 @@ func main() {
 
 	fmt.Printf("Serving directory %s on http://localhost:%s\n", dir, *portFlag)
 
+	mux := http.NewServeMux()
+	
+	mux.HandleFunc("/api/calendar_events", func(w http.ResponseWriter, r *http.Request) {
+		events, err := fetchCalendarEvents(srv)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(events)
+	})
+
 	// Create a file server for the specified directory
 	fs := http.FileServer(http.Dir(dir))
+	mux.Handle("/", fs)
 
 	// Apply our middleware
-	handler := applyHeaders(fs)
+	handler := applyHeaders(mux)
 
 	if err := http.ListenAndServe(":"+*portFlag, handler); err != nil {
 		log.Fatal(err)

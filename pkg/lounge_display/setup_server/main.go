@@ -465,11 +465,37 @@ func main() {
 				fmt.Println("No upcoming events found.")
 			} else {
 				for _, item := range events.Items {
-					date := item.Start.DateTime
-					if date == "" {
-						date = item.Start.Date
+					startDate := item.Start.DateTime
+					if startDate == "" {
+						startDate = item.Start.Date
 					}
-					fmt.Printf("%v (%v)\n", item.Summary, date)
+					endDate := ""
+					if item.End != nil {
+						endDate = item.End.DateTime
+						if endDate == "" {
+							endDate = item.End.Date
+						}
+					}
+
+					acceptedStatus := "unknown"
+					for _, attendee := range item.Attendees {
+						if attendee.Self {
+							acceptedStatus = attendee.ResponseStatus
+							break
+						}
+					}
+					if len(item.Attendees) == 0 {
+						acceptedStatus = "accepted"
+					}
+
+					fmt.Printf("%v (Start: %v, End: %v)\n", item.Summary, startDate, endDate)
+					fmt.Printf("  Accepted Status: %v\n", acceptedStatus)
+					if item.Description != "" {
+						fmt.Printf("  Description: %v\n", item.Description)
+					}
+					if item.HangoutLink != "" {
+						fmt.Printf("  Meet Link: %v\n", item.HangoutLink)
+					}
 				}
 			}
 			hasCalendar = true
