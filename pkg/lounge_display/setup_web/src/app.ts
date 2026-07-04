@@ -193,6 +193,7 @@ export class SetupDisplay extends LitElement {
   @state() private extraHtml: TemplateResult | undefined = undefined;
   
   @state() private allClear = false;
+  @state() private countdown = 15;
 
   connectedCallback() {
     super.connectedCallback();
@@ -241,6 +242,7 @@ export class SetupDisplay extends LitElement {
       if (this.stage === 1) {
         const passed = await this.checkStage1();
         if (passed) {
+          await new Promise(r => setTimeout(r, 3000));
           this.stage = 2;
           this.isLoading = true;
           this.statusPageText = 'Checking for credentials';
@@ -254,6 +256,7 @@ export class SetupDisplay extends LitElement {
       } else if (this.stage === 2) {
         const passed = await this.checkStage2();
         if (passed) {
+          await new Promise(r => setTimeout(r, 3000));
           this.stage = 3;
           this.isLoading = true;
           this.statusPageText = 'Checking for auth token';
@@ -302,18 +305,12 @@ export class SetupDisplay extends LitElement {
       } else if (this.stage === 3) {
         const hasAuth = await this.checkStage3();
         if (hasAuth) {
+          await new Promise(r => setTimeout(r, 3000));
+          this.stage = 4;
           this.isLoading = true;
-          this.statusPageText = 'Finalizing setup...';
+          this.statusPageText = 'Checking if we can fetch calendar events';
           this.extraHtml = undefined;
-          
-          const isReady = await this.checkStage3Ready();
-          if (isReady) {
-            this.allClear = true;
-            setTimeout(() => {
-              window.location.href = '/';
-            }, 1500);
-            break;
-          }
+          continue;
         } else {
           this.isLoading = false;
           this.statusPageText = 'Authorize the display';
@@ -360,6 +357,35 @@ export class SetupDisplay extends LitElement {
             }
           }
         }
+      } else if (this.stage === 4) {
+        const hasCalendar = await this.checkStage4();
+        if (hasCalendar) {
+          await new Promise(r => setTimeout(r, 3000));
+          this.stage = 5;
+          this.isLoading = true;
+          this.statusPageText = 'Finalization';
+          this.extraHtml = undefined;
+          continue;
+        } else {
+          this.isLoading = true;
+          this.statusPageText = 'Checking if we can fetch calendar events';
+          this.extraHtml = undefined;
+        }
+      } else if (this.stage === 5) {
+        const isFinalized = await this.checkStage5();
+        if (isFinalized) {
+          await new Promise(r => setTimeout(r, 3000));
+          this.stage = 6;
+          this.isLoading = false;
+          this.statusPageText = 'Setup was successfull refreshing in 15';
+          this.extraHtml = undefined;
+          this.startCountdown();
+          return; // exit the polling loop completely since countdown takes over
+        } else {
+          this.isLoading = true;
+          this.statusPageText = 'Finalization';
+          this.extraHtml = undefined;
+        }
       }
       
       await new Promise(resolve => setTimeout(resolve, 15000));
@@ -387,23 +413,45 @@ export class SetupDisplay extends LitElement {
   }
 
   private async checkStage3(): Promise<boolean> {
-    const res = await WrapPromise(fetch('/api/has_auth'), 'failed fetch');
+    const res = await WrapPromise(fetch('/auth/has_token'), 'failed fetch');
     if (!res.ok || !res.safeUnwrap().ok) return false;
     
     const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
-    if (!dataRes.ok || !dataRes.safeUnwrap().hasAuth) return false;
+    if (!dataRes.ok || !dataRes.safeUnwrap().hasToken) return false;
     
     return true;
   }
 
-  private async checkStage3Ready(): Promise<boolean> {
-    const res = await WrapPromise(fetch('/api/status'), 'failed fetch');
+  private async checkStage4(): Promise<boolean> {
+    const res = await WrapPromise(fetch('/auth/has_calendar'), 'failed fetch');
     if (!res.ok || !res.safeUnwrap().ok) return false;
     
     const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
-    if (!dataRes.ok || dataRes.safeUnwrap().status !== 'ready') return false;
+    if (!dataRes.ok || !dataRes.safeUnwrap().hasCalendar) return false;
     
     return true;
+  }
+
+  private async checkStage5(): Promise<boolean> {
+    const res = await WrapPromise(fetch('/auth/finalize'), 'failed fetch');
+    if (!res.ok || !res.safeUnwrap().ok) return false;
+    
+    const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
+    if (!dataRes.ok || !dataRes.safeUnwrap().success) return false;
+    
+    return true;
+  }
+
+  private startCountdown() {
+    this.countdown = 15;
+    const interval = setInterval(() => {
+      this.countdown--;
+      this.statusPageText = `Setup was successfull refreshing in ${this.countdown}`;
+      if (this.countdown <= 0) {
+        clearInterval(interval);
+        window.location.reload();
+      }
+    }, 1000);
   }
 
   render() {
@@ -457,12 +505,38 @@ export class SetupDisplay extends LitElement {
           <div class="stage-container ${this.stage > 3 ? 'completed-hide' : ''}">
             <label class="check-item">
               <md-checkbox ?checked=${this.stage > 3} disabled></md-checkbox>
-              <span>Link auth token</span>
+              <span>Get auth token</span>
             </label>
             <div class="extra-html-container ${this.stage === 3 && this.extraHtml ? 'open' : ''}">
               ${this.stage === 3 ? this.extraHtml : ''}
             </div>
           </div>
+          
+          <div class="stage-container ${this.stage > 4 ? 'completed-hide' : ''}">
+            <label class="check-item">
+              <md-checkbox ?checked=${this.stage > 4} disabled></md-checkbox>
+              <span>Got Calendar Events</span>
+            </label>
+            <div class="extra-html-container ${this.stage === 4 && this.extraHtml ? 'open' : ''}">
+              ${this.stage === 4 ? this.extraHtml : ''}
+            </div>
+          </div>
+
+          <div class="stage-container ${this.stage > 5 ? 'completed-hide' : ''}">
+            <label class="check-item">
+              <md-checkbox ?checked=${this.stage > 5} disabled></md-checkbox>
+              <span>Finalized</span>
+            </label>
+            <div class="extra-html-container ${this.stage === 5 && this.extraHtml ? 'open' : ''}">
+              ${this.stage === 5 ? this.extraHtml : ''}
+            </div>
+          </div>
+
+          ${this.stage === 6 ? html`
+            <div class="check-item" style="justify-content: center; font-size: 1.3rem; margin-top: 20px; text-align: center; text-wrap: wrap;">
+              ${this.statusPageText}
+            </div>
+          ` : ''}
         </div>
       </div>
     `;

@@ -61,7 +61,7 @@ WORKDIR /oauth
 WORKDIR /app
 
 ENV OAUTH_DIR="/oauth"
-ENV OAUTH_REDIRECT_URL="http://localhost:7070/auth"
+ENV OAUTH_REDIRECT_URL="http://localhost:7070"
 
 # Install ca-certificates required for OAuth / Google APIs over HTTPS
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*

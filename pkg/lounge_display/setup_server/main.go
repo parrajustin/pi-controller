@@ -66,6 +66,8 @@ var credChan = make(chan []byte)
 var authCodeChan = make(chan string)
 var authURLStr string
 var setupReady bool
+var hasToken bool
+var hasCalendar bool
 
 type tokenPayload struct {
 	Code string `json:"code"`
@@ -73,16 +75,16 @@ type tokenPayload struct {
 
 // runReceiver spawns the receiver binary and returns the extracted ticket.
 // It also starts a goroutine to read the received code and send it to authCodeChan.
-func runReceiver(binPath string) (string, error) {
+func runReceiver(binPath string) (string, *exec.Cmd, error) {
 	cmd := exec.Command(binPath)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	scanner := bufio.NewScanner(stdout)
@@ -99,7 +101,7 @@ func runReceiver(binPath string) (string, error) {
 	}
 
 	if ticket == "" {
-		return "", fmt.Errorf("failed to extract ticket from receiver")
+		return "", nil, fmt.Errorf("failed to extract ticket from receiver")
 	}
 
 	// Continue reading for the code in a goroutine
@@ -120,10 +122,10 @@ func runReceiver(binPath string) (string, error) {
 	}()
 
 	if err := scanner.Err(); err != nil {
-		return ticket, fmt.Errorf("error reading receiver stdout: %v", err)
+		return ticket, nil, fmt.Errorf("error reading receiver stdout: %v", err)
 	}
 
-	return ticket, nil
+	return ticket, cmd, nil
 }
 
 func startHTTPServer(dir, port string) {
@@ -240,10 +242,11 @@ func startHTTPServer(dir, port string) {
 	// /api/token endpoint
 	mux.HandleFunc("/api/token", func(w http.ResponseWriter, r *http.Request) {
 		code := ""
-		if r.Method == http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
 			// Support Google direct redirect back to this endpoint
 			code = r.URL.Query().Get("code")
-		} else if r.Method == http.MethodPost {
+		case http.MethodPost:
 			// Support frontend POSTing the code/token
 			var payload tokenPayload
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -251,7 +254,7 @@ func startHTTPServer(dir, port string) {
 				return
 			}
 			code = payload.Code
-		} else {
+		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
@@ -266,6 +269,44 @@ func startHTTPServer(dir, port string) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status": "ok"}`))
+	})
+
+	// /auth/has_token endpoint
+	mux.HandleFunc("/auth/has_token", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"hasToken": hasToken})
+	})
+
+	// /auth/has_calendar endpoint
+	mux.HandleFunc("/auth/has_calendar", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"hasCalendar": hasCalendar})
+	})
+
+	// /auth/finalize endpoint
+	mux.HandleFunc("/auth/finalize", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !hasCalendar {
+			http.Error(w, "Not permitted", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"success":true}`))
+		go func() {
+			time.Sleep(1 * time.Second)
+			os.Exit(0)
+		}()
 	})
 
 	// Apply CORS and CSP headers
@@ -339,7 +380,7 @@ func main() {
 		log.Fatalf("Env OAUTH_REDIRECT_URL is required.")
 	}
 
-	ticket, err := runReceiver(*receiverFlag)
+	ticket, cmd, err := runReceiver(*receiverFlag)
 	if err != nil {
 		log.Fatalf("Failed to run receiver: %v", err)
 	}
@@ -382,6 +423,11 @@ func main() {
 		fmt.Println("Saved token.json")
 	}
 
+	if cmd != nil && cmd.Process != nil {
+		cmd.Process.Kill()
+	}
+	hasToken = true
+
 	// 5. Final Logic (Calendar API)
 	client := config.Client(ctx, tok)
 	srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
@@ -390,25 +436,30 @@ func main() {
 	}
 
 	t := time.Now().Format(time.RFC3339)
-	events, err := srv.Events.List("primary").ShowDeleted(false).
-		SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
-	if err != nil {
-		log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
-	}
-	fmt.Println("Upcoming events:")
-	if len(events.Items) == 0 {
-		fmt.Println("No upcoming events found.")
-	} else {
-		for _, item := range events.Items {
-			date := item.Start.DateTime
-			if date == "" {
-				date = item.Start.Date
+	for {
+		events, err := srv.Events.List("primary").ShowDeleted(false).
+			SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
+		if err == nil {
+			fmt.Println("Upcoming events:")
+			if len(events.Items) == 0 {
+				fmt.Println("No upcoming events found.")
+			} else {
+				for _, item := range events.Items {
+					date := item.Start.DateTime
+					if date == "" {
+						date = item.Start.Date
+					}
+					fmt.Printf("%v (%v)\n", item.Summary, date)
+				}
 			}
-			fmt.Printf("%v (%v)\n", item.Summary, date)
+			hasCalendar = true
+			break
 		}
+		fmt.Printf("Unable to retrieve calendar events: %v. Retrying in 5 seconds...\n", err)
+		time.Sleep(5 * time.Second)
 	}
 
-	fmt.Println("Setup logic complete! The server will exit in 3 seconds to hand over to display_server.")
+	fmt.Println("Setup logic complete! Waiting for /auth/finalize to be called...")
 	setupReady = true
-	time.Sleep(3 * time.Second)
+	select {}
 }
