@@ -65,6 +65,21 @@ export class LoungeDisplay extends LitElement {
       display: flex;
       min-height: 0;
     }
+
+    .no-events-card {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      color: var(--text-secondary);
+      background-color: rgba(255, 255, 255, 0.05);
+      border-radius: 24px;
+      margin-bottom: 24px;
+      padding: 48px;
+      text-align: center;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
   `;
 
   @state() private currentTime = new Date();
@@ -189,7 +204,10 @@ export class LoungeDisplay extends LitElement {
         <div class="header-time">${headerTimeStr}</div>
       </div>
 
-      <meeting-list .meetings=${displayedMeetings}></meeting-list>
+      ${displayedMeetings.length > 0
+        ? html`<meeting-list .meetings=${displayedMeetings}></meeting-list>`
+        : html`<div class="no-events-card">No calendar events found! Time to sit back for refreshment and repose!</div>`
+      }
 
       <bottom-bar></bottom-bar>
     `;

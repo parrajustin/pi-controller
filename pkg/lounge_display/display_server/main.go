@@ -78,9 +78,10 @@ type EventInfo struct {
 }
 
 func fetchCalendarEvents(srv *calendar.Service) ([]EventInfo, error) {
-	t := time.Now().Add(-15 * time.Minute).Format(time.RFC3339)
+	tMin := time.Now().Add(-15 * time.Minute).Format(time.RFC3339)
+	tMax := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
 	events, err := srv.Events.List("primary").ShowDeleted(false).
-		SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
+		SingleEvents(true).TimeMin(tMin).TimeMax(tMax).MaxResults(10).OrderBy("startTime").Do()
 	if err != nil {
 		return nil, err
 	}
