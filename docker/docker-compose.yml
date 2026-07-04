@@ -1,6 +1,7 @@
 version: '2'
 volumes:
   settings:
+  chrome_data:
 services:
   wifi-connect:
     build: ./wifi-connect
@@ -24,9 +25,9 @@ services:
       - 5011:5011
     volumes:
       - 'settings:/data'
+      - 'chrome_data:/chrome-data'
     environment:
       LAUNCH_URL: "mountainviewmasoniclodge.com"
       LAUNCH_URL_HDMI: "https://www.google.com"
     depends_on:
       - wifi-connect
-
