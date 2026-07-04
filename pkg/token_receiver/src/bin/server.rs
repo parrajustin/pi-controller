@@ -18,12 +18,17 @@ async fn main() {
     let addr = env::var("SERVER_ADDR").unwrap_or_else(|_| "0.0.0.0:7070".to_string());
 
     let app = Router::new()
+        .route("/health", get(health_handler))
         .route("/auth/:ticket_str", get(auth_handler))
         .route("/render", get(render_handler));
 
     println!("Starting server on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn health_handler() -> &'static str {
+    "OK"
 }
 
 async fn auth_handler(

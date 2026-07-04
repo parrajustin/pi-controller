@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  token-receiver:
+    # Use the appropriate tag for your architecture:
+    # - latest-x86_64 for standard PCs/Servers
+    # - latest-aarch64 for Raspberry Pi/ARM devices
+    image: xerofuzzion/lounge_display_token_reciever:latest-x86_64
+    ports:
+      - "7070:7070"
+    environment:
+      - SERVER_ADDR=0.0.0.0:7070
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7070/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
