@@ -31,19 +31,13 @@ RUN pnpm run build
 # Remove non-serving files to prepare for a clean copy
 RUN rm -rf node_modules src package.json pnpm-lock.yaml tsconfig.json
 
-# Stage 4: Build display_server Go binary
-FROM golang:alpine AS display_go_builder
+# Stage 4: Build Go binaries
+FROM golang:alpine AS go_builder
 WORKDIR /app
-COPY display_server/main.go .
-# Compile a statically linked Go binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o display_server main.go
-
-# Stage 5: Build setup_server Go binary
-FROM golang:alpine AS setup_go_builder
-WORKDIR /app
-COPY setup_server/main.go .
-RUN go mod init setup_server && go mod tidy
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o setup_server main.go
+COPY . .
+RUN go mod init github.com/parrajustin/pi-controller/pkg/lounge_display && go mod tidy
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /build/display_server ./display_server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /build/setup_server ./setup_server/main.go
 
 # Stage 6: Build token_receiver Rust binary
 FROM rust:slim AS rust_builder
@@ -67,8 +61,8 @@ ENV OAUTH_REDIRECT_URL="http://localhost:7070"
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
 # Copy the go binaries
-COPY --from=display_go_builder /app/display_server /app/display_server
-COPY --from=setup_go_builder /app/setup_server /app/setup_server
+COPY --from=go_builder /build/display_server /app/display_server
+COPY --from=go_builder /build/setup_server /app/setup_server
 
 # Copy the rust binary
 COPY --from=rust_builder /app/receiver /app/receiver

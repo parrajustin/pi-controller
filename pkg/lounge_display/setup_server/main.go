@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/parrajustin/pi-controller/pkg/lounge_display/cryptoutil"
+
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
@@ -197,14 +199,18 @@ func startHTTPServer(dir, port string) {
 		if oauthDir == "" {
 			oauthDir = "."
 		}
-		tokPath := filepath.Join(oauthDir, "token.json")
+		encKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+		tokPath := filepath.Join(oauthDir, "token.json.enc")
 		hasAuth := false
 
-		if f, err := os.Open(tokPath); err == nil {
-			defer f.Close()
-			tok := &oauth2.Token{}
-			if err := json.NewDecoder(f).Decode(tok); err == nil && tok.AccessToken != "" {
-				hasAuth = true
+		if encKey != "" {
+			if ciphertext, err := os.ReadFile(tokPath); err == nil {
+				if plaintext, err := cryptoutil.Decrypt(ciphertext, encKey); err == nil {
+					tok := &oauth2.Token{}
+					if err := json.Unmarshal(plaintext, tok); err == nil && tok.AccessToken != "" {
+						hasAuth = true
+					}
+				}
 			}
 		}
 
@@ -318,6 +324,11 @@ func startHTTPServer(dir, port string) {
 }
 
 func main() {
+	encKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	if encKey == "" {
+		log.Fatalf("TOKEN_ENCRYPTION_KEY environment variable is required")
+	}
+
 	dirFlag := flag.String("dir", "startup", "the directory to serve")
 	portFlag := flag.String("port", "8080", "the port to listen on")
 	receiverFlag := flag.String("receiver", "/app/receiver", "the path to the receiver binary")
@@ -344,7 +355,7 @@ func main() {
 	}
 
 	credPath := filepath.Join(oauthDir, "credentials.json")
-	tokPath := filepath.Join(oauthDir, "token.json")
+	tokPath := filepath.Join(oauthDir, "token.json.enc")
 
 	// 3. Credentials Phase
 	var credBytes []byte
@@ -389,12 +400,15 @@ func main() {
 	ctx := context.Background()
 	var tok *oauth2.Token
 
-	// Check if token.json exists
-	if f, err := os.Open(tokPath); err == nil {
-		defer f.Close()
-		tok = &oauth2.Token{}
-		if err := json.NewDecoder(f).Decode(tok); err != nil {
-			tok = nil
+	// Check if token.json.enc exists
+	if ciphertext, err := os.ReadFile(tokPath); err == nil {
+		if plaintext, err := cryptoutil.Decrypt(ciphertext, encKey); err == nil {
+			tok = &oauth2.Token{}
+			if err := json.Unmarshal(plaintext, tok); err != nil {
+				tok = nil
+			}
+		} else {
+			fmt.Printf("Failed to decrypt token: %v\n", err)
 		}
 	}
 
@@ -413,14 +427,20 @@ func main() {
 			log.Fatalf("Unable to retrieve token from web: %v", err)
 		}
 
-		// Save token
-		f, err := os.OpenFile(tokPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+		// Encrypt and save token
+		tokenBytes, err := json.Marshal(tok)
+		if err != nil {
+			log.Fatalf("Unable to marshal oauth token: %v", err)
+		}
+		ciphertext, err := cryptoutil.Encrypt(tokenBytes, encKey)
+		if err != nil {
+			log.Fatalf("Unable to encrypt oauth token: %v", err)
+		}
+		err = os.WriteFile(tokPath, ciphertext, 0600)
 		if err != nil {
 			log.Fatalf("Unable to cache oauth token: %v", err)
 		}
-		defer f.Close()
-		json.NewEncoder(f).Encode(tok)
-		fmt.Println("Saved token.json")
+		fmt.Println("Saved encrypted token.json.enc")
 	}
 
 	if cmd != nil && cmd.Process != nil {
