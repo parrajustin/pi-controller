@@ -8,7 +8,7 @@ Xvfb :0 -screen 0 1536x960x24 -listen tcp -ac &
 sleep 1
 
 echo "Starting x11vnc"
-x11vnc -display :0 -nopw -listen localhost -xkb -ncache 10 -ncache_cr -forever &
+x11vnc -display :0 -nopw -listen localhost -xkb -forever &
 sleep 1
 
 # Create an index.html so going to the root URL loads noVNC directly
@@ -24,6 +24,10 @@ sleep 1
 # Clean up any leftover lock files from previous unclean shutdowns
 echo "Cleaning up Chromium lock files..."
 rm -f "$CHROME_DATA_DIR/SingletonLock"
+
+echo "Starting socat proxy for Chrome DevTools on port 9223"
+socat TCP-LISTEN:9223,fork,bind=0.0.0.0 TCP:127.0.0.1:9222 &
+sleep 1
 
 echo "Starting Chromium..."
 DISPLAY=:0 chromium \
