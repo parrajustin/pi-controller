@@ -36,7 +36,11 @@ DISPLAY=:0 chromium \
   --no-first-run \
   --disable-pinch \
   --no-sandbox \
+  --use-fake-ui-for-media-stream \
+  --use-fake-device-for-media-stream \
   --disable-dev-shm-usage \
+  --enable-logging=stderr \
+  --v=1 \
   --remote-debugging-port=9222 \
   --remote-debugging-address=0.0.0.0 \
   --remote-allow-origins="*" \

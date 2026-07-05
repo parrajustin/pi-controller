@@ -1,0 +1,48 @@
+version: '3.8'
+services:
+  kiosk_debug:
+    build:
+      context: ./kiosk_debug
+    container_name: kiosk_debug
+    privileged: true
+    shm_size: 2g
+    ports:
+      - "5050:5050"
+      - "9222:9223"
+      - "5900:5900"
+    volumes:
+      - "./kiosk_debug/chrome-data:/chrome-data"
+    restart: always
+
+  lounge_display:
+    build:
+      context: ./lounge_display
+      additional_contexts:
+        token_receiver: ./token_receiver
+    container_name: lounge_display
+    ports:
+      - "8080:8080"
+    environment:
+      - SKIP_SETUP=${SKIP_SETUP:-false}
+      - HOST_IP=${HOST_IP}
+      - KIOSK_IP=kiosk_debug
+      - CDP_PORT=9223
+      - TOKEN_ENCRYPTION_KEY=default_local_dev_key_change_me_in_prod
+    volumes:
+      - "./lounge_display/oauth_test:/oauth"
+      - "./lounge_display/logs:/app/logs"
+    depends_on:
+      - kiosk_debug
+
+  token-receiver:
+    image: xerofuzzion/lounge_display_token_reciever:latest-x86_64
+    ports:
+      - "7070:7070"
+    environment:
+      - SERVER_ADDR=0.0.0.0:7070
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7070/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

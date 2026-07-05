@@ -2,3 +2,6 @@
 oauth_test
 
 credentials.json
+
+# ignore debugging logs stuff
+logs/

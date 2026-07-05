@@ -239,30 +239,35 @@ export class SetupDisplay extends LitElement {
 
   private async startPolling() {
     while (!this.allClear) {
-      if (this.stage === 1) {
-        const passed = await this.checkStage1();
-        if (passed) {
-          await new Promise(r => setTimeout(r, 3000));
-          this.stage = 2;
-          this.isLoading = true;
-          this.statusPageText = 'Checking for credentials';
-          this.extraHtml = undefined;
-          continue;
-        } else {
+      const stateRes = await WrapPromise(fetch('/api/state'), 'failed fetch');
+      let currentNode = "";
+      if (stateRes.ok && stateRes.safeUnwrap().ok) {
+        const stateData = await WrapPromise(stateRes.safeUnwrap().json(), 'failed json');
+        if (stateData.ok && stateData.safeUnwrap().current_node) {
+          currentNode = stateData.safeUnwrap().current_node;
+        }
+      }
+
+      if (!currentNode) {
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+
+      const hasWifi = await this.checkStage1();
+      if (!hasWifi) {
+          this.stage = 1;
           this.isLoading = false;
           this.statusPageText = 'Please Connect this Pi to the internet';
           this.extraHtml = html`<pre><code>mvda-lounge-display-wifi-portal</code></pre>`;
-        }
-      } else if (this.stage === 2) {
-        const passed = await this.checkStage2();
-        if (passed) {
-          await new Promise(r => setTimeout(r, 3000));
-          this.stage = 3;
-          this.isLoading = true;
-          this.statusPageText = 'Checking for auth token';
-          this.extraHtml = undefined;
+          await new Promise(r => setTimeout(r, 5000));
           continue;
-        } else {
+      }
+
+      if (currentNode === "Init Server") {
+          await new Promise(r => setTimeout(r, 1000));
+          continue;
+      } else if (currentNode === "Credentials Phase") {
+          this.stage = 2;
           this.isLoading = false;
           this.statusPageText = 'Upload Credentials to display';
           
@@ -279,12 +284,7 @@ export class SetupDisplay extends LitElement {
           const uploadUrl = `http://${hostIp}/upload.html`;
           
           const qrRes = await WrapPromise(QRCode.toDataURL(uploadUrl, {
-            margin: 2,
-            width: 180,
-            color: {
-              dark: '#000000',
-              light: '#ffffff'
-            }
+            margin: 2, width: 180, color: { dark: '#000000', light: '#ffffff' }
           }), 'failed to generate qr');
 
           if (qrRes.ok) {
@@ -301,17 +301,8 @@ export class SetupDisplay extends LitElement {
               </div>
             `;
           }
-        }
-      } else if (this.stage === 3) {
-        const hasAuth = await this.checkStage3();
-        if (hasAuth) {
-          await new Promise(r => setTimeout(r, 3000));
-          this.stage = 4;
-          this.isLoading = true;
-          this.statusPageText = 'Checking if we can fetch calendar events';
-          this.extraHtml = undefined;
-          continue;
-        } else {
+      } else if (currentNode === "Auth Token Phase") {
+          this.stage = 3;
           this.isLoading = false;
           this.statusPageText = 'Authorize the display';
           
@@ -323,12 +314,7 @@ export class SetupDisplay extends LitElement {
               if (url) {
                 if (!this.extraHtml) {
                   const qrRes = await WrapPromise(QRCode.toDataURL(url, {
-                    margin: 2,
-                    width: 180,
-                    color: {
-                      dark: '#000000',
-                      light: '#ffffff'
-                    }
+                    margin: 2, width: 180, color: { dark: '#000000', light: '#ffffff' }
                   }), 'failed to generate qr');
         
                   if (qrRes.ok) {
@@ -356,39 +342,70 @@ export class SetupDisplay extends LitElement {
               }
             }
           }
-        }
-      } else if (this.stage === 4) {
-        const hasCalendar = await this.checkStage4();
-        if (hasCalendar) {
-          await new Promise(r => setTimeout(r, 3000));
-          this.stage = 5;
-          this.isLoading = true;
-          this.statusPageText = 'Finalization';
-          this.extraHtml = undefined;
-          continue;
-        } else {
+      } else if (currentNode === "Calendar Logic Phase") {
+          this.stage = 4;
           this.isLoading = true;
           this.statusPageText = 'Checking if we can fetch calendar events';
           this.extraHtml = undefined;
-        }
-      } else if (this.stage === 5) {
-        const isFinalized = await this.checkStage5();
-        if (isFinalized) {
-          await new Promise(r => setTimeout(r, 3000));
-          this.stage = 6;
+      } else if (currentNode === "Password Input Page") {
+          this.stage = 5;
           this.isLoading = false;
-          this.statusPageText = 'Setup was successfull refreshing in 15';
-          this.extraHtml = undefined;
-          this.startCountdown();
-          return; // exit the polling loop completely since countdown takes over
-        } else {
+          this.statusPageText = 'Google requires your password';
+          this.extraHtml = html`
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+               <div style="font-size: 0.9rem;">Please enter your Google account password to proceed.</div>
+               <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                 <md-outlined-text-field id="google-password-input" label="Google Password" type="password" style="flex-grow: 1;"></md-outlined-text-field>
+                 <md-filled-button @click=${this.handlePasswordSubmit}>Submit</md-filled-button>
+               </div>
+            </div>
+          `;
+      } else if (currentNode === "Finalize Setup") {
+          this.stage = 6;
           this.isLoading = true;
           this.statusPageText = 'Finalization';
           this.extraHtml = undefined;
-        }
+          
+          const res = await WrapPromise(fetch('/auth/finalize'), 'failed fetch');
+          if (res.ok && res.safeUnwrap().ok) {
+            const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
+            if (dataRes.ok && dataRes.safeUnwrap().success) {
+               this.stage = 7;
+               this.isLoading = false;
+               this.statusPageText = 'Setup was successfull refreshing in 15';
+               this.allClear = true;
+               this.startCountdown();
+               return; 
+            }
+          }
+      } else {
+          this.stage = 5;
+          this.isLoading = true;
+          this.statusPageText = 'Logging in to meet.google.com (' + currentNode + ')';
+          this.extraHtml = undefined;
       }
       
-      await new Promise(resolve => setTimeout(resolve, 15000));
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+  }
+
+  private async handlePasswordSubmit() {
+    if (!this.shadowRoot) return;
+    const input = this.shadowRoot.querySelector('#google-password-input') as HTMLInputElement;
+    if (!input || !input.value) return;
+
+    const password = input.value;
+    const res = await WrapPromise(fetch('/api/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password })
+    }), 'Failed to post password');
+
+    if (res.ok && res.safeUnwrap().ok) {
+      input.value = '';
+      this.statusPageText = 'Password submitted, processing...';
+    } else {
+      alert('Failed to submit password');
     }
   }
 
@@ -398,46 +415,6 @@ export class SetupDisplay extends LitElement {
     
     const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
     if (!dataRes.ok || !dataRes.safeUnwrap().internetAccess) return false;
-    
-    return true;
-  }
-
-  private async checkStage2(): Promise<boolean> {
-    const res = await WrapPromise(fetch('/api/has_cred'), 'failed fetch');
-    if (!res.ok || !res.safeUnwrap().ok) return false;
-    
-    const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
-    if (!dataRes.ok || !dataRes.safeUnwrap().hasCreds) return false;
-    
-    return true;
-  }
-
-  private async checkStage3(): Promise<boolean> {
-    const res = await WrapPromise(fetch('/auth/has_token'), 'failed fetch');
-    if (!res.ok || !res.safeUnwrap().ok) return false;
-    
-    const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
-    if (!dataRes.ok || !dataRes.safeUnwrap().hasToken) return false;
-    
-    return true;
-  }
-
-  private async checkStage4(): Promise<boolean> {
-    const res = await WrapPromise(fetch('/auth/has_calendar'), 'failed fetch');
-    if (!res.ok || !res.safeUnwrap().ok) return false;
-    
-    const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
-    if (!dataRes.ok || !dataRes.safeUnwrap().hasCalendar) return false;
-    
-    return true;
-  }
-
-  private async checkStage5(): Promise<boolean> {
-    const res = await WrapPromise(fetch('/auth/finalize'), 'failed fetch');
-    if (!res.ok || !res.safeUnwrap().ok) return false;
-    
-    const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
-    if (!dataRes.ok || !dataRes.safeUnwrap().success) return false;
     
     return true;
   }
@@ -525,14 +502,24 @@ export class SetupDisplay extends LitElement {
           <div class="stage-container ${this.stage > 5 ? 'completed-hide' : ''}">
             <label class="check-item">
               <md-checkbox ?checked=${this.stage > 5} disabled></md-checkbox>
-              <span>Finalized</span>
+              <span>Google Login</span>
             </label>
             <div class="extra-html-container ${this.stage === 5 && this.extraHtml ? 'open' : ''}">
               ${this.stage === 5 ? this.extraHtml : ''}
             </div>
           </div>
 
-          ${this.stage === 6 ? html`
+          <div class="stage-container ${this.stage > 6 ? 'completed-hide' : ''}">
+            <label class="check-item">
+              <md-checkbox ?checked=${this.stage > 6} disabled></md-checkbox>
+              <span>Finalized</span>
+            </label>
+            <div class="extra-html-container ${this.stage === 6 && this.extraHtml ? 'open' : ''}">
+              ${this.stage === 6 ? this.extraHtml : ''}
+            </div>
+          </div>
+
+          ${this.stage === 7 ? html`
             <div class="check-item" style="justify-content: center; font-size: 1.3rem; margin-top: 20px; text-align: center; text-wrap: wrap;">
               ${this.statusPageText}
             </div>

@@ -37,6 +37,7 @@ docker run \
     --name "$CONTAINER_NAME" \
     --restart always \
     --privileged \
+    --shm-size=2g \
     -p 5050:5050 \
     -p 9222:9223 \
     -p 5900:5900 \

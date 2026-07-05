@@ -22,6 +22,7 @@ echo "Detected Host IP: $HOST_IP"
 
 # Ensure the oauth_test directory exists before mounting so it's not created as root
 mkdir -p oauth_test
+mkdir -p logs
 
 echo "Starting the container on port 8080 with /oauth volume mounted..."
-docker run --rm -p 8080:8080 -e SKIP_SETUP="$SKIP_SETUP" -e HOST_IP="$HOST_IP" -e TOKEN_ENCRYPTION_KEY="default_local_dev_key_change_me_in_prod" -v "$(pwd)/oauth_test:/oauth" lounge_display
+docker run --rm -p 8080:8080 -e SKIP_SETUP="$SKIP_SETUP" -e HOST_IP="$HOST_IP" -e TOKEN_ENCRYPTION_KEY="default_local_dev_key_change_me_in_prod" -v "$(pwd)/oauth_test:/oauth" -v "$(pwd)/logs:/app/logs" lounge_display
