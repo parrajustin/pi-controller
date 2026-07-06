@@ -80,24 +80,77 @@ export class LoungeDisplay extends LitElement {
       text-align: center;
       box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
-    .in-meeting-card {
+    .in-meeting-container {
       flex: 1;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      font-size: 2.5rem;
-      font-weight: 500;
-      color: var(--text-primary);
+      gap: 32px;
       background-color: var(--card-bg, #ffffff);
       border-radius: 24px;
       margin-bottom: 24px;
       padding: 48px;
-      text-align: center;
       box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .in-meeting-title {
+      font-size: 2.5rem;
+      font-weight: 500;
+      color: var(--text-primary);
+    }
+    .meeting-controls {
+      display: flex;
+      gap: 24px;
+    }
+    .control-btn {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background-color: #3c4043;
+      color: white;
+    }
+    .control-btn:hover {
+      filter: brightness(1.1);
+    }
+    .control-btn.off {
+      background-color: #ea4335;
+    }
+    .control-btn.raised {
+      background-color: #8ab4f8;
+      color: #202124;
+    }
+    .control-btn.hangup {
+      background-color: #ea4335;
+      border-radius: 32px;
+      width: 96px;
+    }
+    .control-btn .material-symbols-outlined {
+      font-size: 32px;
+    }
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-weight: normal;
+      font-style: normal;
+      line-height: 1;
+      letter-spacing: normal;
+      text-transform: none;
+      display: inline-block;
+      white-space: nowrap;
+      word-wrap: normal;
+      direction: ltr;
+      -webkit-font-feature-settings: 'liga';
+      -webkit-font-smoothing: antialiased;
     }
   `;
 
   @state() private serverState = { current_node: '', meeting_code: '' };
+  @state() private meetingState = { microphone: false, camera: false, hand: false, in_meeting: false };
 
   @state() private currentTime = new Date();
   private timer?: ReturnType<typeof setInterval>;
@@ -170,8 +223,29 @@ export class LoungeDisplay extends LitElement {
       if (response.ok) {
         this.serverState = await response.json();
       }
+
+      if (this.serverState.current_node === 'In Meeting') {
+        const meetResponse = await fetch('/api/meeting/button_state');
+        if (meetResponse.ok) {
+          this.meetingState = await meetResponse.json();
+        }
+      }
     } catch (e) {
       console.error('Failed to fetch server state', e);
+    }
+  }
+
+  private async clickMeetingButton(button: string) {
+    try {
+      await fetch('/api/meeting/click_button', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ button })
+      });
+      // Immediately refresh state
+      await this.fetchServerState();
+    } catch (e) {
+      console.error('Failed to click button', e);
     }
   }
 
@@ -237,15 +311,43 @@ export class LoungeDisplay extends LitElement {
 
       ${
         this.serverState.current_node === 'In Meeting' && this.serverState.meeting_code !== 'landing'
-          ? html`<div class="in-meeting-card">in meeting ${this.serverState.meeting_code}</div>`
-          : displayedMeetings.length > 0
-            ? html`<meeting-list .meetings=${displayedMeetings}></meeting-list>`
-            : html`<div class="no-events-card">
-                No calendar events found! Time to sit back for refreshment and repose!
-              </div>`
+          ? html`
+              <div class="in-meeting-container">
+                <div class="in-meeting-title">In Meeting: ${this.serverState.meeting_code}</div>
+                <div class="meeting-controls">
+                  <!-- Mic -->
+                  <button class="control-btn ${!this.meetingState.microphone ? 'off' : ''}" @click=${() => this.clickMeetingButton('microphone')}>
+                    <span class="material-symbols-outlined">
+                      ${this.meetingState.microphone ? 'mic' : 'mic_off'}
+                    </span>
+                  </button>
+                  <!-- Camera -->
+                  <button class="control-btn ${!this.meetingState.camera ? 'off' : ''}" @click=${() => this.clickMeetingButton('camera')}>
+                    <span class="material-symbols-outlined">
+                      ${this.meetingState.camera ? 'videocam' : 'videocam_off'}
+                    </span>
+                  </button>
+                  <!-- Hand -->
+                  <button class="control-btn ${this.meetingState.hand ? 'raised' : ''}" @click=${() => this.clickMeetingButton('hand')}>
+                    <span class="material-symbols-outlined">front_hand</span>
+                  </button>
+                  <!-- Hangup -->
+                  <button class="control-btn hangup" @click=${() => this.clickMeetingButton('hangup')}>
+                    <span class="material-symbols-outlined">call_end</span>
+                  </button>
+                </div>
+              </div>
+            `
+          : html`
+              ${displayedMeetings.length > 0
+                ? html`<meeting-list .meetings=${displayedMeetings}></meeting-list>`
+                : html`<div class="no-events-card">
+                    No calendar events found! Time to sit back for refreshment and repose!
+                  </div>`
+              }
+              <bottom-bar></bottom-bar>
+            `
       }
-
-      <bottom-bar></bottom-bar>
     `;
   }
 }

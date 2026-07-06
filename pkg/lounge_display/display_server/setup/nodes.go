@@ -30,6 +30,7 @@ var (
 	NavigateToMeeting *Node
 	JoinMeetingNode   *Node
 	InMeetingNode     *Node
+	LeaveMeetingNode  *Node
 )
 
 func InitNodes() *Node {
@@ -361,15 +362,53 @@ func InitNodes() *Node {
 		},
 	}
 
+	LeaveMeetingNode = &Node{
+		Name: "Leave Meeting",
+		PreCheck: func(s *StateContext) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.NavTarget == "LeaveMeeting"
+		},
+		Work: func(s *StateContext) error {
+			s.mu.Lock()
+			s.NavTarget = ""
+			s.mu.Unlock()
+
+			var clicked bool
+			err := chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+				(function() {
+					let btn = document.querySelector('button[aria-label*="leave" i], button[aria-label*="hang" i]');
+					if (btn) {
+						btn.click();
+						return true;
+					}
+					return false;
+				})();
+			`, &clicked))
+
+			if err != nil {
+				return fmt.Errorf("failed to click leave button: %w", err)
+			}
+
+			if !clicked {
+				return fmt.Errorf("leave button not found")
+			}
+
+			time.Sleep(2 * time.Second)
+			return nil
+		},
+	}
+
 	// Link nodes
 	InitServerNode.Next = []*Node{AuthNode}
 	AuthNode.Next = []*Node{CalendarNode}
 	CalendarNode.Next = []*Node{InitCDPNode}
 	InitCDPNode.Next = []*Node{StartMeetNode}
-	StartMeetNode.Next = []*Node{FinishedMeetNode, JoinMeetingNode, InMeetingNode}
+	StartMeetNode.Next = []*Node{FinishedMeetNode, JoinMeetingNode, InMeetingNode, NavigateToMeeting}
 	FinishedMeetNode.Next = []*Node{NavigateToMeeting, JoinMeetingNode, InMeetingNode}
 	JoinMeetingNode.Next = []*Node{InMeetingNode, FinishedMeetNode}
-	InMeetingNode.Next = []*Node{FinishedMeetNode, NavigateToMeeting}
+	InMeetingNode.Next = []*Node{FinishedMeetNode, NavigateToMeeting, LeaveMeetingNode}
+	LeaveMeetingNode.Next = []*Node{StartMeetNode}
 	NavigateToMeeting.Next = []*Node{JoinMeetingNode, InMeetingNode, FinishedMeetNode}
 
 	return InitServerNode

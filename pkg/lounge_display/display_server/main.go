@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/chromedp/chromedp"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/display_server/setup"
 	"google.golang.org/api/calendar/v3"
 )
@@ -188,6 +189,117 @@ func main() {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status": "ok"}`))
+	})
+
+	mux.HandleFunc("/api/meeting/button_state", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		
+		nodeName := stateCtx.GetNodeName()
+		if nodeName != "In Meeting" || stateCtx.TargetCtx == nil {
+			log.Printf("[/api/meeting/button_state] Not in meeting (Node: %s, TargetCtx exists: %v)\n", nodeName, stateCtx.TargetCtx != nil)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"in_meeting": false,
+				"microphone": false,
+				"camera":     false,
+				"hand":       false,
+			})
+			return
+		}
+
+		var stateJSON string
+		err := chromedp.Run(stateCtx.TargetCtx, chromedp.Evaluate(`
+			(function() {
+				let micBtn = document.querySelector('button[aria-label*="microphone" i]');
+				let camBtn = document.querySelector('button[aria-label*="camera" i]');
+				let handBtn = document.querySelector('button[aria-label*="hand" i]');
+				
+				let micOn = micBtn ? micBtn.getAttribute('aria-label').toLowerCase().includes('turn off') : false;
+				let camOn = camBtn ? camBtn.getAttribute('aria-label').toLowerCase().includes('turn off') : false;
+				let handRaised = handBtn ? handBtn.getAttribute('aria-label').toLowerCase().includes('lower') : false;
+
+				return JSON.stringify({
+					in_meeting: true,
+					microphone: micOn,
+					camera: camOn,
+					hand: handRaised
+				});
+			})();
+		`, &stateJSON))
+
+		if err != nil {
+			log.Printf("[/api/meeting/button_state] Error evaluating state: %v\n", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		
+		w.Write([]byte(stateJSON))
+	})
+
+	mux.HandleFunc("/api/meeting/click_button", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		
+		nodeName := stateCtx.GetNodeName()
+		if nodeName != "In Meeting" || stateCtx.TargetCtx == nil {
+			log.Printf("[/api/meeting/click_button] Not in meeting (Node: %s, TargetCtx exists: %v)\n", nodeName, stateCtx.TargetCtx != nil)
+			http.Error(w, "Not in meeting", http.StatusBadRequest)
+			return
+		}
+
+		var payload struct {
+			Button string `json:"button"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			log.Printf("[/api/meeting/click_button] Invalid JSON payload: %v\n", err)
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
+
+		var query string
+		switch payload.Button {
+		case "microphone":
+			query = `button[aria-label*="microphone" i]`
+		case "camera":
+			query = `button[aria-label*="camera" i]`
+		case "hand":
+			query = `button[aria-label*="hand" i]`
+		case "hangup":
+			log.Printf("[/api/meeting/click_button] Triggering LeaveMeeting node\n")
+			stateCtx.SetNavTarget("LeaveMeeting", nil)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]bool{"clicked": true})
+			return
+		default:
+			log.Printf("[/api/meeting/click_button] Unknown button requested: %s\n", payload.Button)
+			http.Error(w, "Unknown button", http.StatusBadRequest)
+			return
+		}
+
+		log.Printf("[/api/meeting/click_button] Attempting to click %s using query: %s\n", payload.Button, query)
+
+		var clicked bool
+		err := chromedp.Run(stateCtx.TargetCtx, chromedp.Evaluate(fmt.Sprintf(`
+			(function() {
+				let btn = document.querySelector('%s');
+				if (btn) {
+					btn.click();
+					return true;
+				}
+				return false;
+			})();
+		`, query), &clicked))
+
+		if err != nil {
+			log.Printf("[/api/meeting/click_button] Error executing click script: %v\n", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("[/api/meeting/click_button] Click result for %s: %v\n", payload.Button, clicked)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"clicked": clicked})
 	})
 
 	// Run the setup flow
