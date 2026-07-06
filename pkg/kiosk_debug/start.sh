@@ -39,8 +39,6 @@ DISPLAY=:0 chromium \
   --use-fake-ui-for-media-stream \
   --use-fake-device-for-media-stream \
   --disable-dev-shm-usage \
-  --enable-logging=stderr \
-  --v=1 \
   --remote-debugging-port=9222 \
   --remote-debugging-address=0.0.0.0 \
   --remote-allow-origins="*" \
@@ -48,6 +46,10 @@ DISPLAY=:0 chromium \
   --window-size=1536,960 \
   --window-position=0,0 \
   "$LAUNCH_URL" &
+
+# --enable-logging=stderr \rr \
+# --v=1 \
+# --v=1 \
 
 # Wait for background processes
 wait

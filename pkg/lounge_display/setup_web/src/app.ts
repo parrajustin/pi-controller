@@ -7,6 +7,8 @@ import '@material/web/button/filled-button.js';
 import splashImg from '../splash.png';
 import { WrapPromise } from 'standard-ts-lib/src/wrap_promise.js';
 import QRCode from 'qrcode';
+import './components/virtual-keyboard.js';
+import { KeyPressedEvent } from './components/virtual-keyboard.js';
 
 @customElement('setup-display')
 export class SetupDisplay extends LitElement {
@@ -183,6 +185,66 @@ export class SetupDisplay extends LitElement {
       color: #a8c7fa;
       font-family: monospace;
     }
+
+    .keyboard-overlay {
+      position: fixed;
+      inset: 0;
+      background-color: var(--bg-color, #202124);
+      z-index: 2000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      animation: fadeIn 0.2s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .overlay-input-container {
+      display: flex;
+      align-items: center;
+      background-color: var(--card-bg, #28292c);
+      padding: 0 24px;
+      height: 64px;
+      border-radius: 32px;
+      gap: 16px;
+      width: calc(100% - 32px);
+      max-width: 768px;
+      margin-top: 24px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      animation: slideDown 0.3s cubic-bezier(0.2, 0, 0, 1);
+      box-sizing: border-box;
+    }
+
+    .overlay-input {
+      background: transparent;
+      border: none;
+      color: var(--text-primary, #e8eaed);
+      font-size: 1.5rem;
+      font-family: monospace;
+      outline: none;
+      width: 100%;
+    }
+
+    .keyboard-popup {
+      margin-top: auto;
+      margin-bottom: 12px;
+      width: 100%;
+      max-width: 800px;
+      display: flex;
+      justify-content: center;
+      animation: slideUp 0.4s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideUp {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    @keyframes slideDown {
+      from { transform: translateY(-50%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
   `;
 
   @state() private showChecklist = false;
@@ -194,6 +256,45 @@ export class SetupDisplay extends LitElement {
   
   @state() private allClear = false;
   @state() private countdown = 15;
+  @state() private activeKeyboardInput: 'token' | 'password' | null = null;
+  @state() private showKeyboardInputText = false;
+  @state() private keyboardInputValue = '';
+
+  private openKeyboard(type: 'token' | 'password', target: any) {
+    this.activeKeyboardInput = type;
+    this.showKeyboardInputText = false;
+    this.keyboardInputValue = target.value || '';
+  }
+
+  private handleKeyPress(e: CustomEvent<KeyPressedEvent>) {
+    const key = e.detail.key;
+    const inputId = this.activeKeyboardInput === 'token' ? '#token-input' : '#google-password-input';
+    const input = this.shadowRoot?.querySelector(inputId) as any;
+    if (!input) return;
+
+    if (key === 'Dismiss') {
+      this.activeKeyboardInput = null;
+      return;
+    }
+    
+    if (key === 'Enter') {
+      this.activeKeyboardInput = null;
+      if (inputId === '#token-input') this.handleTokenSubmit();
+      if (inputId === '#google-password-input') this.handlePasswordSubmit();
+      return;
+    }
+
+    let val = this.keyboardInputValue;
+    if (key === 'Backspace') {
+      val = val.slice(0, -1);
+    } else if (key === 'Left' || key === 'Right') {
+      // not easily handled without selectionStart
+    } else {
+      val += key;
+    }
+    input.value = val;
+    this.keyboardInputValue = val;
+  }
 
   connectedCallback() {
     super.connectedCallback();
@@ -328,7 +429,7 @@ export class SetupDisplay extends LitElement {
                           Google may redirect to a broken 'localhost' page. Copy that full URL and paste it below:
                         </div>
                         <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-                          <md-outlined-text-field id="token-input" label="Paste URL or Code" style="flex-grow: 1;"></md-outlined-text-field>
+                          <md-outlined-text-field id="token-input" label="Paste URL or Code" style="flex-grow: 1;" @focus=${(e: Event) => this.openKeyboard('token', e.target)}></md-outlined-text-field>
                           <md-filled-button @click=${this.handleTokenSubmit}>Submit</md-filled-button>
                         </div>
                       </div>
@@ -355,7 +456,7 @@ export class SetupDisplay extends LitElement {
             <div style="display: flex; flex-direction: column; gap: 8px;">
                <div style="font-size: 0.9rem;">Please enter your Google account password to proceed.</div>
                <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-                 <md-outlined-text-field id="google-password-input" label="Google Password" type="password" style="flex-grow: 1;"></md-outlined-text-field>
+                 <md-outlined-text-field id="google-password-input" label="Google Password" type="password" style="flex-grow: 1;" @focus=${(e: Event) => this.openKeyboard('password', e.target)}></md-outlined-text-field>
                  <md-filled-button @click=${this.handlePasswordSubmit}>Submit</md-filled-button>
                </div>
             </div>
@@ -526,6 +627,40 @@ export class SetupDisplay extends LitElement {
           ` : ''}
         </div>
       </div>
+
+      ${this.activeKeyboardInput ? html`
+        <div class="keyboard-overlay" @pointerdown=${(e: Event) => {
+          if (e.target === e.currentTarget) this.activeKeyboardInput = null;
+        }}>
+          <div class="overlay-input-container">
+            <div style="cursor: pointer; padding: 8px; display: flex; color: var(--text-secondary, #9aa0a6);" @click=${() => this.showKeyboardInputText = !this.showKeyboardInputText}>
+              ${this.showKeyboardInputText 
+                 ? html`<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                     <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+                   </svg>`
+                 : html`<svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor">
+                     <path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/>
+                   </svg>`
+              }
+            </div>
+            <input 
+              type=${this.showKeyboardInputText ? 'text' : 'password'} 
+              class="overlay-input"
+              .value=${this.keyboardInputValue}
+              @input=${(e: Event) => {
+                const target = e.target as HTMLInputElement;
+                this.keyboardInputValue = target.value;
+                const inputId = this.activeKeyboardInput === 'token' ? '#token-input' : '#google-password-input';
+                const input = this.shadowRoot?.querySelector(inputId) as HTMLInputElement;
+                if (input) input.value = target.value;
+              }}
+            >
+          </div>
+          <div class="keyboard-popup">
+            <virtual-keyboard @key-pressed=${this.handleKeyPress}></virtual-keyboard>
+          </div>
+        </div>
+      ` : ''}
     `;
   }
 }

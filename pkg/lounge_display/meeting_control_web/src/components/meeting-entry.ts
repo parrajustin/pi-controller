@@ -8,6 +8,7 @@ export interface Meeting {
   name: string;
   status: string;
   isActive: boolean;
+  meetCode?: string;
 }
 
 @customElement('meeting-entry')
@@ -61,9 +62,26 @@ export class MeetingEntry extends LitElement {
     }
   `;
 
+  private async handleJoinMeeting() {
+    if (this.meeting.meetCode) {
+      try {
+        await fetch('/api/join_meeting', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: this.meeting.meetCode }),
+        });
+      } catch (e) {
+        console.error('Failed to join meeting:', e);
+      }
+    }
+  }
+
   render() {
     return html`
-      <div class="meeting-row ${this.meeting.isActive ? 'active' : ''}">
+      <div
+        class="meeting-row ${this.meeting.isActive ? 'active' : ''}"
+        @click=${this.handleJoinMeeting}
+      >
         <md-ripple></md-ripple>
         <div class="meeting-time">${this.meeting.time}</div>
         <div class="meeting-name">${this.meeting.name}</div>

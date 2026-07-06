@@ -7,15 +7,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
-	"github.com/parrajustin/pi-controller/pkg/lounge_display/cryptoutil"
-	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
+	"github.com/chromedp/chromedp"
+	"github.com/parrajustin/pi-controller/pkg/lounge_display/display_server/setup"
 	"google.golang.org/api/calendar/v3"
-	"google.golang.org/api/option"
 )
 
 // applyHeaders adds headers to fix CORS and CSP (Content Security Policy) issues.
@@ -40,32 +40,6 @@ func applyHeaders(h http.Handler) http.Handler {
 
 		h.ServeHTTP(w, r)
 	})
-}
-
-// loadAuth loads and decrypts the OAuth token from token.json.enc
-func loadAuth(oauthDir string) (*oauth2.Token, error) {
-	encKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
-	if encKey == "" {
-		return nil, fmt.Errorf("TOKEN_ENCRYPTION_KEY is required")
-	}
-
-	tokPath := filepath.Join(oauthDir, "token.json.enc")
-	ciphertext, err := os.ReadFile(tokPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read token: %w", err)
-	}
-
-	plaintext, err := cryptoutil.Decrypt(ciphertext, encKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt token: %w", err)
-	}
-
-	tok := &oauth2.Token{}
-	if err := json.Unmarshal(plaintext, tok); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal token: %w", err)
-	}
-
-	return tok, nil
 }
 
 type EventInfo struct {
@@ -132,38 +106,14 @@ func main() {
 	portFlag := flag.String("port", "8080", "the port to listen on")
 	flag.Parse()
 
+	encKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	if encKey == "" {
+		log.Fatalf("TOKEN_ENCRYPTION_KEY is required")
+	}
+
 	oauthDir := os.Getenv("OAUTH_DIR")
 	if oauthDir == "" {
 		oauthDir = "."
-	}
-	tok, err := loadAuth(oauthDir)
-	if err != nil {
-		log.Fatalf("Failed to load auth token: %v", err)
-	}
-
-	fmt.Printf("Successfully decrypted auth token for display server usage (valid=%v)\n", tok.Valid())
-
-	credPath := filepath.Join(oauthDir, "credentials.json")
-	credBytes, err := os.ReadFile(credPath)
-	if err != nil {
-		log.Fatalf("Unable to read credentials file: %v", err)
-	}
-	config, err := google.ConfigFromJSON(credBytes, calendar.CalendarReadonlyScope)
-	if err != nil {
-		log.Fatalf("Unable to parse client secret file to config: %v", err)
-	}
-
-	ctx := context.Background()
-	client := config.Client(ctx, tok)
-	srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
-	if err != nil {
-		log.Fatalf("Unable to retrieve Calendar client: %v", err)
-	}
-
-	// Fail if we can't fetch test calendar events
-	_, err = fetchCalendarEvents(srv)
-	if err != nil {
-		log.Fatalf("Failed to fetch initial calendar events: %v", err)
 	}
 
 	dir, err := filepath.Abs(*dirFlag)
@@ -175,12 +125,44 @@ func main() {
 		log.Fatalf("Directory does not exist: %v", dir)
 	}
 
-	fmt.Printf("Serving directory %s on http://localhost:%s\n", dir, *portFlag)
-
 	mux := http.NewServeMux()
-	
+
+	stateCtx := &setup.StateContext{
+		Mux:      mux,
+		DirFlag:  dir,
+		PortFlag: *portFlag,
+		EncKey:   encKey,
+		OauthDir: oauthDir,
+	}
+
+	// Start the server in a goroutine
+	go func() {
+		fmt.Printf("Serving directory %s on http://localhost:%s\n", dir, *portFlag)
+		fs := http.FileServer(http.Dir(dir))
+		mux.Handle("/", fs)
+		handler := applyHeaders(mux)
+		if err := http.ListenAndServe(":"+*portFlag, handler); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// Run the setup flow
+	startNode := setup.InitNodes()
+	setup.RunEngine(startNode, stateCtx)
+
+	fmt.Println("Setup completed successfully. Starting application APIs...")
+
+	// Register the application APIs
+	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"current_node": stateCtx.GetNodeName(),
+			"meeting_code": stateCtx.MeetingCode,
+		})
+	})
+
 	mux.HandleFunc("/api/calendar_events", func(w http.ResponseWriter, r *http.Request) {
-		events, err := fetchCalendarEvents(srv)
+		events, err := fetchCalendarEvents(stateCtx.CalendarSrv)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -189,14 +171,80 @@ func main() {
 		json.NewEncoder(w).Encode(events)
 	})
 
-	// Create a file server for the specified directory
-	fs := http.FileServer(http.Dir(dir))
-	mux.Handle("/", fs)
+	mux.HandleFunc("/api/join_meeting", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-	// Apply our middleware
-	handler := applyHeaders(mux)
+		var payload struct {
+			Code string `json:"code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
 
-	if err := http.ListenAndServe(":"+*portFlag, handler); err != nil {
-		log.Fatal(err)
-	}
+		if payload.Code == "" {
+			http.Error(w, "Meeting code is required", http.StatusBadRequest)
+			return
+		}
+
+		meetURL := fmt.Sprintf("https://meet.google.com/%s", payload.Code)
+		fmt.Printf("Joining meeting: %s\n", meetURL)
+
+		err := chromedp.Run(stateCtx.TargetCtx, chromedp.Navigate(meetURL))
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to navigate: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		stateCtx.MeetingCode = payload.Code
+		stateCtx.SetNodeName("In Meeting")
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status": "ok"}`))
+	})
+
+	// Background state monitor
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			var urlStr string
+			ctx, cancel := context.WithTimeout(stateCtx.TargetCtx, 2*time.Second)
+			err := chromedp.Run(ctx, chromedp.Location(&urlStr))
+			cancel()
+			if err != nil {
+				continue
+			}
+
+			u, err := url.Parse(urlStr)
+			if err != nil {
+				continue
+			}
+
+			if u.Host != "meet.google.com" {
+				fmt.Printf("Unexpected navigation to %s. Resetting to meet.google.com\n", u.Host)
+				_ = chromedp.Run(stateCtx.TargetCtx, chromedp.Navigate("https://meet.google.com"))
+				stateCtx.SetNodeName("Finished Meet")
+				stateCtx.MeetingCode = ""
+			} else {
+				path := strings.TrimPrefix(u.Path, "/")
+				if path == "" || path == "new" {
+					if stateCtx.GetNodeName() == "In Meeting" {
+						stateCtx.SetNodeName("Finished Meet")
+						stateCtx.MeetingCode = ""
+					}
+				} else {
+					if stateCtx.GetNodeName() != "In Meeting" || stateCtx.MeetingCode != path {
+						stateCtx.SetNodeName("In Meeting")
+						stateCtx.MeetingCode = path
+					}
+				}
+			}
+		}
+	}()
+
+	// Block forever
+	select {}
 }

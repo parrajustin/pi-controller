@@ -78,9 +78,26 @@ export class LoungeDisplay extends LitElement {
       margin-bottom: 24px;
       padding: 48px;
       text-align: center;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .in-meeting-card {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2.5rem;
+      font-weight: 500;
+      color: var(--text-primary);
+      background-color: var(--card-bg, #ffffff);
+      border-radius: 24px;
+      margin-bottom: 24px;
+      padding: 48px;
+      text-align: center;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
   `;
+
+  @state() private serverState = { current_node: '', meeting_code: '' };
 
   @state() private currentTime = new Date();
   private timer?: ReturnType<typeof setInterval>;
@@ -96,41 +113,43 @@ export class LoungeDisplay extends LitElement {
       const response = await fetch('/api/calendar_events');
       if (!response.ok) throw new Error('Network error');
       const events: EventInfo[] = await response.json();
-      
+
       if (!events) {
-          this.meetings = [];
-          this.updateMeetings();
-          return;
+        this.meetings = [];
+        this.updateMeetings();
+        return;
       }
-      
-      const newMeetings = events.map(e => {
+
+      const newMeetings = events.map((e) => {
         const start = parseISO(e.startTime);
         const end = parseISO(e.endTime);
         const lengthInSeconds = (end.getTime() - start.getTime()) / 1000;
-        
+        const meetCode = e.meetLink ? e.meetLink.split('/').pop() : undefined;
+
         return {
           time: format(start, 'h:mm a'),
           lengthInSeconds: Math.max(0, lengthInSeconds),
           name: e.name,
-          status: '', 
-          isActive: false, 
+          status: '',
+          isActive: false,
+          meetCode,
         };
       });
       this.meetings = newMeetings;
       this.updateMeetings();
     } catch (e) {
-      console.error("Failed to fetch calendar events", e);
+      console.error('Failed to fetch calendar events', e);
     }
   }
 
   connectedCallback() {
     super.connectedCallback();
     this.fetchCalendarEvents();
-    
+
     // Top-of-minute syncing for fetch
     const now = new Date();
     const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
-    
+
     this.fetchTimeout = setTimeout(() => {
       this.fetchCalendarEvents();
       this.fetchTimer = setInterval(() => {
@@ -141,7 +160,19 @@ export class LoungeDisplay extends LitElement {
     this.timer = setInterval(() => {
       this.currentTime = new Date();
       this.updateMeetings();
+      this.fetchServerState();
     }, 1000);
+  }
+
+  private async fetchServerState() {
+    try {
+      const response = await fetch('/api/state');
+      if (response.ok) {
+        this.serverState = await response.json();
+      }
+    } catch (e) {
+      console.error('Failed to fetch server state', e);
+    }
   }
 
   disconnectedCallback() {
@@ -160,7 +191,7 @@ export class LoungeDisplay extends LitElement {
   private updateMeetings() {
     let changed = false;
     const now = new Date();
-    const updated = this.meetings.map(m => {
+    const updated = this.meetings.map((m) => {
       const start = parse(m.time, 'h:mm a', now);
       const end = addSeconds(start, m.lengthInSeconds);
       const isActive = isWithinInterval(this.currentTime, { start, end });
@@ -180,7 +211,7 @@ export class LoungeDisplay extends LitElement {
     const headerTimeStr = `${format(this.currentTime, 'h:mm a')} • ${format(this.currentTime, 'E, MMM d')}`;
 
     const now = new Date();
-    let firstFutureOrActiveIndex = this.meetings.findIndex(m => {
+    let firstFutureOrActiveIndex = this.meetings.findIndex((m) => {
       const start = parse(m.time, 'h:mm a', now);
       const end = addSeconds(start, m.lengthInSeconds);
       return end > this.currentTime;
@@ -204,9 +235,14 @@ export class LoungeDisplay extends LitElement {
         <div class="header-time">${headerTimeStr}</div>
       </div>
 
-      ${displayedMeetings.length > 0
-        ? html`<meeting-list .meetings=${displayedMeetings}></meeting-list>`
-        : html`<div class="no-events-card">No calendar events found! Time to sit back for refreshment and repose!</div>`
+      ${
+        this.serverState.current_node === 'In Meeting' && this.serverState.meeting_code !== 'landing'
+          ? html`<div class="in-meeting-card">in meeting ${this.serverState.meeting_code}</div>`
+          : displayedMeetings.length > 0
+            ? html`<meeting-list .meetings=${displayedMeetings}></meeting-list>`
+            : html`<div class="no-events-card">
+                No calendar events found! Time to sit back for refreshment and repose!
+              </div>`
       }
 
       <bottom-bar></bottom-bar>
