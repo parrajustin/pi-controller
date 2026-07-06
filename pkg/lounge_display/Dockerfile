@@ -35,9 +35,14 @@ RUN rm -rf node_modules src package.json pnpm-lock.yaml tsconfig.json
 FROM golang:alpine AS go_builder
 WORKDIR /app
 COPY . .
-RUN go mod init github.com/parrajustin/pi-controller/pkg/lounge_display && go mod tidy
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /build/display_server ./display_server/main.go
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /build/setup_server ./setup_server/main.go
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod init github.com/parrajustin/pi-controller/pkg/lounge_display && go mod tidy
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /build/display_server ./display_server/main.go
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /build/setup_server ./setup_server/main.go
 
 # Stage 6: Build token_receiver Rust binary
 FROM rust:slim AS rust_builder
