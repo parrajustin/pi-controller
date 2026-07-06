@@ -1,19 +1,15 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/display_server/setup"
 	"google.golang.org/api/calendar/v3"
 )
@@ -128,11 +124,12 @@ func main() {
 	mux := http.NewServeMux()
 
 	stateCtx := &setup.StateContext{
-		Mux:      mux,
-		DirFlag:  dir,
-		PortFlag: *portFlag,
-		EncKey:   encKey,
-		OauthDir: oauthDir,
+		Mux:         mux,
+		DirFlag:     dir,
+		PortFlag:    *portFlag,
+		EncKey:      encKey,
+		OauthDir:    oauthDir,
+		NodeTimeout: 10 * time.Minute,
 	}
 
 	// Start the server in a goroutine
@@ -146,11 +143,7 @@ func main() {
 		}
 	}()
 
-	// Run the setup flow
-	startNode := setup.InitNodes()
-	setup.RunEngine(startNode, stateCtx)
-
-	fmt.Println("Setup completed successfully. Starting application APIs...")
+	fmt.Println("Starting application APIs...")
 
 	// Register the application APIs
 	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
@@ -190,61 +183,14 @@ func main() {
 			return
 		}
 
-		meetURL := fmt.Sprintf("https://meet.google.com/%s", payload.Code)
-		fmt.Printf("Joining meeting: %s\n", meetURL)
-
-		err := chromedp.Run(stateCtx.TargetCtx, chromedp.Navigate(meetURL))
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to navigate: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		stateCtx.MeetingCode = payload.Code
-		stateCtx.SetNodeName("In Meeting")
+		// Tell the engine to move to NavigateToMeeting node
+		stateCtx.SetNavTarget("NavigateToMeeting", map[string]interface{}{"code": payload.Code})
 
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status": "ok"}`))
 	})
 
-	// Background state monitor
-	go func() {
-		for {
-			time.Sleep(1 * time.Second)
-			var urlStr string
-			ctx, cancel := context.WithTimeout(stateCtx.TargetCtx, 2*time.Second)
-			err := chromedp.Run(ctx, chromedp.Location(&urlStr))
-			cancel()
-			if err != nil {
-				continue
-			}
-
-			u, err := url.Parse(urlStr)
-			if err != nil {
-				continue
-			}
-
-			if u.Host != "meet.google.com" {
-				fmt.Printf("Unexpected navigation to %s. Resetting to meet.google.com\n", u.Host)
-				_ = chromedp.Run(stateCtx.TargetCtx, chromedp.Navigate("https://meet.google.com"))
-				stateCtx.SetNodeName("Finished Meet")
-				stateCtx.MeetingCode = ""
-			} else {
-				path := strings.TrimPrefix(u.Path, "/")
-				if path == "" || path == "new" {
-					if stateCtx.GetNodeName() == "In Meeting" {
-						stateCtx.SetNodeName("Finished Meet")
-						stateCtx.MeetingCode = ""
-					}
-				} else {
-					if stateCtx.GetNodeName() != "In Meeting" || stateCtx.MeetingCode != path {
-						stateCtx.SetNodeName("In Meeting")
-						stateCtx.MeetingCode = path
-					}
-				}
-			}
-		}
-	}()
-
-	// Block forever
-	select {}
+	// Run the setup flow
+	startNode := setup.InitNodes()
+	setup.RunEngine(startNode, stateCtx)
 }

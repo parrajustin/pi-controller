@@ -141,6 +141,7 @@ type StateContext struct {
 	ReceiverFlag string
 	EncKey       string
 	OauthDir     string
+	NodeTimeout  time.Duration
 }
 
 func (s *StateContext) SetNodeName(name string) {
@@ -167,22 +168,23 @@ func registerRoute(s *StateContext, path string, handler http.HandlerFunc) {
 }
 
 type Node struct {
-	Name      string
-	Setup     func(s *StateContext) error
-	PreCheck  func(s *StateContext) bool
-	Work      func(s *StateContext) error
-	DoneCheck func(s *StateContext) error
-	Teardown  func(s *StateContext) error
-	Next      []*Node
+	Name       string
+	IsRestNode bool
+	Setup      func(s *StateContext) error
+	PreCheck   func(s *StateContext) bool
+	Work       func(s *StateContext) error
+	DoneCheck  func(s *StateContext) error
+	Teardown   func(s *StateContext) error
+	Next       []*Node
 }
 
 var (
-	InitServerNode       *Node
-	CredentialsNode      *Node
-	AuthTokenNode        *Node
-	CalendarNode         *Node
-	InitCDPNode          *Node
-	FinalizeNode         *Node
+	InitServerNode  *Node
+	CredentialsNode *Node
+	AuthTokenNode   *Node
+	CalendarNode    *Node
+	InitCDPNode     *Node
+	FinalizeNode    *Node
 
 	StartMeetNode            *Node
 	FinishedMeetNode         *Node
@@ -197,11 +199,11 @@ var (
 	TwoFactorNode            *Node
 )
 
-func captureDebugArtifacts(s *StateContext, stepName string) {
+func captureDebugArtifacts(s *StateContext, stepName string, phase string, prefix string) {
 	if s.TargetCtx == nil {
 		return
 	}
-	fmt.Printf("Capturing artifacts for step %04d: %s...\n", s.StepCounter, stepName)
+	fmt.Printf("Capturing artifacts for step %04d: %s (%s)...\n", s.StepCounter, stepName, phase)
 	var html string
 	var screenshotBuf []byte
 
@@ -221,8 +223,8 @@ func captureDebugArtifacts(s *StateContext, stepName string) {
 		log.Printf("Warning: Failed to create logs dir: %v\n", err)
 	}
 
-	htmlFile := fmt.Sprintf("%s/%04d_%s_dump.html", s.LogsDir, s.StepCounter, stepName)
-	imgFile := fmt.Sprintf("%s/%04d_%s_screenshot.png", s.LogsDir, s.StepCounter, stepName)
+	htmlFile := fmt.Sprintf("%s/%04d_%s%s_%s_dump.html", s.LogsDir, s.StepCounter, prefix, stepName, phase)
+	imgFile := fmt.Sprintf("%s/%04d_%s%s_%s_screenshot.png", s.LogsDir, s.StepCounter, prefix, stepName, phase)
 
 	os.WriteFile(htmlFile, []byte(html), 0644)
 	os.WriteFile(imgFile, screenshotBuf, 0644)
@@ -232,7 +234,7 @@ func captureDebugArtifacts(s *StateContext, stepName string) {
 func initNodes() {
 	// --- Server Setup Nodes ---
 	InitServerNode = &Node{
-		Name: "Init Server",
+		Name:     "Init Server",
 		PreCheck: func(s *StateContext) bool { return true },
 		Setup: func(s *StateContext) error {
 			if s.Mux != nil {
@@ -279,6 +281,7 @@ func initNodes() {
 
 	CredentialsNode = &Node{
 		Name: "Credentials Phase",
+		IsRestNode: true,
 		Setup: func(s *StateContext) error {
 			registerRoute(s, "/api/has_cred", func(w http.ResponseWriter, r *http.Request) {
 				credPath := filepath.Join(s.OauthDir, "credentials.json")
@@ -287,7 +290,9 @@ func initNodes() {
 				json.NewEncoder(w).Encode(map[string]bool{"hasCreds": err == nil})
 			})
 			registerRoute(s, "/api/cred", func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost { return }
+				if r.Method != http.MethodPost {
+					return
+				}
 				body, _ := io.ReadAll(r.Body)
 				credChan <- body
 				w.Header().Set("Content-Type", "application/json")
@@ -302,7 +307,9 @@ func initNodes() {
 				fmt.Println("Waiting for credentials on POST /api/cred...")
 				credBytes := <-credChan
 				err := os.WriteFile(credPath, credBytes, 0600)
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 				fmt.Println("Saved credentials.json")
 			}
 			return nil
@@ -311,6 +318,7 @@ func initNodes() {
 
 	AuthTokenNode = &Node{
 		Name: "Auth Token Phase",
+		IsRestNode: true,
 		Setup: func(s *StateContext) error {
 			registerRoute(s, "/api/has_auth", func(w http.ResponseWriter, r *http.Request) {
 				tokPath := filepath.Join(s.OauthDir, "token.json.enc")
@@ -359,9 +367,11 @@ func initNodes() {
 			tokPath := filepath.Join(s.OauthDir, "token.json.enc")
 			credBytes, _ := os.ReadFile(credPath)
 			config, _ := google.ConfigFromJSON(credBytes, calendar.CalendarReadonlyScope)
-			
+
 			baseURL := os.Getenv("OAUTH_REDIRECT_URL")
-			if baseURL == "" { baseURL = "http://localhost:7070" }
+			if baseURL == "" {
+				baseURL = "http://localhost:7070"
+			}
 
 			var tok *oauth2.Token
 			if ciphertext, err := os.ReadFile(tokPath); err == nil {
@@ -373,9 +383,15 @@ func initNodes() {
 
 			if tok == nil || tok.AccessToken == "" {
 				ticket, cmd, err := runReceiver(s.ReceiverFlag)
-				if err != nil { return err }
-				defer func() { if cmd != nil && cmd.Process != nil { cmd.Process.Kill() } }()
-				
+				if err != nil {
+					return err
+				}
+				defer func() {
+					if cmd != nil && cmd.Process != nil {
+						cmd.Process.Kill()
+					}
+				}()
+
 				config.RedirectURL = fmt.Sprintf("%s/auth/%s", strings.TrimRight(baseURL, "/"), ticket)
 				authURLStr = config.AuthCodeURL("state-token",
 					oauth2.AccessTypeOffline,
@@ -385,7 +401,9 @@ func initNodes() {
 				fmt.Println("Waiting for auth code...")
 				authCode := <-authCodeChan
 				tok, err = config.Exchange(context.Background(), authCode)
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 
 				tokenBytes, _ := json.Marshal(tok)
 				ciphertext, _ := cryptoutil.Encrypt(tokenBytes, s.EncKey)
@@ -411,7 +429,7 @@ func initNodes() {
 			tokPath := filepath.Join(s.OauthDir, "token.json.enc")
 			credBytes, _ := os.ReadFile(credPath)
 			config, _ := google.ConfigFromJSON(credBytes, calendar.CalendarReadonlyScope)
-			
+
 			ciphertext, _ := os.ReadFile(tokPath)
 			plaintext, _ := cryptoutil.Decrypt(ciphertext, s.EncKey)
 			tok := &oauth2.Token{}
@@ -420,7 +438,9 @@ func initNodes() {
 			ctx := context.Background()
 			client := config.Client(ctx, tok)
 			srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
-			if err != nil { return err }
+			if err != nil {
+				return err
+			}
 
 			t := time.Now().Format(time.RFC3339)
 			for {
@@ -441,7 +461,7 @@ func initNodes() {
 	// --- Google Login CDP Nodes ---
 
 	InitCDPNode = &Node{
-		Name: "Init CDP",
+		Name:     "Init CDP",
 		PreCheck: func(s *StateContext) bool { return true },
 		Work: func(s *StateContext) error {
 			kioskIP := os.Getenv("KIOSK_IP")
@@ -460,7 +480,7 @@ func initNodes() {
 			for {
 				allocCtx, _ := chromedp.NewRemoteAllocator(context.Background(), wsURL)
 				ctx, _ := chromedp.NewContext(allocCtx)
-				
+
 				targets, err := chromedp.Targets(ctx)
 				if err == nil {
 					var activeTarget *target.Info
@@ -474,12 +494,12 @@ func initNodes() {
 						targetCtx, _ := chromedp.NewContext(allocCtx, chromedp.WithTargetID(activeTarget.TargetID))
 						s.Ctx = ctx
 						s.TargetCtx = targetCtx
-						
+
 						if err := chromedp.Run(targetCtx); err != nil {
 							fmt.Printf("Init target run failed: %v\n", err)
 							continue
 						}
-						
+
 						fmt.Println("CDP Connected.")
 						return nil
 					}
@@ -491,7 +511,7 @@ func initNodes() {
 	}
 
 	StartMeetNode = &Node{
-		Name: "Start Meet Navigation",
+		Name:     "Start Meet Navigation",
 		PreCheck: func(s *StateContext) bool { return true },
 		Work: func(s *StateContext) error {
 			fmt.Println("Navigating to https://meet.google.com")
@@ -517,8 +537,9 @@ func initNodes() {
 	}
 
 	FinalizeNode = &Node{
-		Name: "Finalize Setup",
-		PreCheck: func(s *StateContext) bool { return true },
+		Name:       "Finalize Setup",
+		IsRestNode: true,
+		PreCheck:   func(s *StateContext) bool { return true },
 		Setup: func(s *StateContext) error {
 			registerRoute(s, "/auth/finalize", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
@@ -532,7 +553,7 @@ func initNodes() {
 		},
 		Work: func(s *StateContext) error {
 			fmt.Println("Setup complete! Waiting for /auth/finalize to be called...")
-			select {}
+			return nil
 		},
 	}
 
@@ -675,11 +696,16 @@ func initNodes() {
 
 	PasswordInputNode = &Node{
 		Name: "Password Input Page",
+		IsRestNode: true,
 		Setup: func(s *StateContext) error {
 			registerRoute(s, "/api/password", func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost { return }
+				if r.Method != http.MethodPost {
+					return
+				}
 				body, _ := io.ReadAll(r.Body)
-				var payload struct { Password string `json:"password"` }
+				var payload struct {
+					Password string `json:"password"`
+				}
 				json.Unmarshal(body, &payload)
 				if payload.Password != "" {
 					s.PasswordChan <- payload.Password
@@ -770,11 +796,11 @@ func initNodes() {
 	StartMeetNode.Next = []*Node{WorkspaceRedirectedNode, FinishedMeetNode}
 	WorkspaceRedirectedNode.Next = []*Node{AccountsGooglePageNode}
 	AccountsGooglePageNode.Next = []*Node{ChooseAccountNode, EmailInputNode, PasswordInputNode}
-	
+
 	ChooseAccountNode.Next = []*Node{AccountOptionExistsNode, AccountOptionMissingNode}
 	AccountOptionExistsNode.Next = []*Node{PasswordInputNode}
 	AccountOptionMissingNode.Next = []*Node{EmailInputNode}
-	
+
 	EmailInputNode.Next = []*Node{PasswordInputNode}
 	PasswordInputNode.Next = []*Node{WrongPasswordNode, TwoFactorNode}
 	WrongPasswordNode.Next = []*Node{PasswordInputNode}
@@ -797,11 +823,19 @@ func RunEngine(startNode *Node, s *StateContext) {
 			}
 		}
 
+		if s.TargetCtx != nil && currentNode != InitServerNode && currentNode != CredentialsNode && currentNode != AuthTokenNode && currentNode != CalendarNode {
+			captureDebugArtifacts(s, strings.ReplaceAll(strings.ToLower(currentNode.Name), " ", "_"), "pre", "setup_")
+		}
+
 		if currentNode.Work != nil {
 			err := currentNode.Work(s)
 			if err != nil {
 				log.Printf("Work failed for node %s: %v\n", currentNode.Name, err)
 			}
+		}
+
+		if s.TargetCtx != nil && currentNode != InitServerNode && currentNode != CredentialsNode && currentNode != AuthTokenNode && currentNode != CalendarNode {
+			captureDebugArtifacts(s, strings.ReplaceAll(strings.ToLower(currentNode.Name), " ", "_"), "post", "setup_")
 		}
 
 		if currentNode.DoneCheck != nil {
@@ -813,29 +847,52 @@ func RunEngine(startNode *Node, s *StateContext) {
 			}
 		}
 
-		if s.TargetCtx != nil && currentNode != InitServerNode && currentNode != CredentialsNode && currentNode != AuthTokenNode && currentNode != CalendarNode {
-			captureDebugArtifacts(s, strings.ReplaceAll(strings.ToLower(currentNode.Name), " ", "_"))
-		}
-
-		if len(currentNode.Next) == 0 {
+		if len(currentNode.Next) == 0 && !currentNode.IsRestNode {
 			fmt.Println("\nFlow finished successfully at terminal node:", currentNode.Name)
 			return
 		}
 
 		fmt.Printf("Finding next node from %d possibilities...\n", len(currentNode.Next))
 		var nextNode *Node
-		
-		deadline := time.Now().Add(10 * time.Second)
-		for time.Now().Before(deadline) && nextNode == nil {
+
+		var timeout time.Duration
+		if currentNode.IsRestNode {
+			timeout = 0
+		} else if s.NodeTimeout > 0 {
+			timeout = s.NodeTimeout
+		} else {
+			timeout = 5 * time.Minute
+		}
+		deadline := time.Now().Add(timeout)
+
+		for nextNode == nil {
+			if !currentNode.IsRestNode && time.Now().After(deadline) {
+				fmt.Printf("Non-rest node timeout reached (%v).\n", timeout)
+				break
+			}
+
 			for _, n := range currentNode.Next {
+				if n == currentNode {
+					continue // Ignore self-links
+				}
 				if n.PreCheck != nil && n.PreCheck(s) {
 					nextNode = n
 					break
 				}
 			}
-			if nextNode == nil {
-				time.Sleep(500 * time.Millisecond)
+
+			if nextNode != nil {
+				break
 			}
+
+			if currentNode.IsRestNode && currentNode.PreCheck != nil {
+				if !currentNode.PreCheck(s) {
+					fmt.Printf("Rest node %s condition is no longer valid.\n", currentNode.Name)
+					break
+				}
+			}
+
+			time.Sleep(500 * time.Millisecond)
 		}
 
 		if nextNode == nil {
@@ -896,6 +953,7 @@ func main() {
 		ReceiverFlag: *receiverFlag,
 		EncKey:       encKey,
 		OauthDir:     oauthDir,
+		NodeTimeout:  20 * time.Minute,
 	}
 
 	initNodes()
