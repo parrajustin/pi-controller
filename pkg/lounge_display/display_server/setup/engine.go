@@ -110,10 +110,9 @@ func RunEngine(startNode *Node, s *StateContext) {
 	if s.DefaultNode == nil {
 		s.DefaultNode = startNode
 	}
-	stepCounter := 0
 	for {
-		stepCounter++
-		fmt.Printf("\n=== Executing Node %04d: %s ===\n", stepCounter, currentNode.Name)
+		s.StepCounter++
+		fmt.Printf("\n=== Executing Node %04d: %s ===\n", s.StepCounter, currentNode.Name)
 		s.SetNodeName(currentNode.Name)
 
 		if currentNode.Setup != nil {

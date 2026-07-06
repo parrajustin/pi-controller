@@ -1,2 +1,3 @@
 # Ignore the built binary.
 server
+display_server_bin

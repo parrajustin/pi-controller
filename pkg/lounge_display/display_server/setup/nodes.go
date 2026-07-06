@@ -28,6 +28,7 @@ var (
 	StartMeetNode     *Node
 	FinishedMeetNode  *Node
 	NavigateToMeeting *Node
+	JoinMeetingNode   *Node
 	InMeetingNode     *Node
 )
 
@@ -209,7 +210,19 @@ func InitNodes() *Node {
 				return false
 			}
 			u, err := url.Parse(urlStr)
-			return err == nil && u.Host == "meet.google.com" && u.Path != "/" && u.Path != "/new" && u.Path != ""
+			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" {
+				return false
+			}
+
+			var hasJoinBtn bool
+			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+				(function() {
+					let btns = Array.from(document.querySelectorAll('button, div[role="button"], span'));
+					return btns.some(b => b.innerText && (b.innerText.toLowerCase().includes('join now') || b.innerText.toLowerCase().includes('ask to join') || b.innerText.toLowerCase().includes('join anyway')) && b.offsetWidth > 0 && b.offsetHeight > 0);
+				})();
+			`, &hasJoinBtn))
+			
+			return !hasJoinBtn
 		},
 		Work: func(s *StateContext) error {
 			var urlStr string
@@ -277,15 +290,87 @@ func InitNodes() *Node {
 		},
 	}
 
+	JoinMeetingNode = &Node{
+		Name: "Join Meeting Page",
+		PreCheck: func(s *StateContext) bool {
+			s.mu.Lock()
+			target := s.NavTarget
+			s.mu.Unlock()
+			if target != "" {
+				return false
+			}
+
+			var urlStr string
+			err := chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			if err != nil {
+				return false
+			}
+			u, err := url.Parse(urlStr)
+			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" {
+				return false
+			}
+
+			var hasJoinBtn bool
+			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+				(function() {
+					let btns = Array.from(document.querySelectorAll('button, div[role="button"], span'));
+					return btns.some(b => b.innerText && (b.innerText.toLowerCase().includes('join now') || b.innerText.toLowerCase().includes('ask to join') || b.innerText.toLowerCase().includes('join anyway')) && b.offsetWidth > 0 && b.offsetHeight > 0);
+				})();
+			`, &hasJoinBtn))
+			return hasJoinBtn
+		},
+		Work: func(s *StateContext) error {
+			deadline := time.Now().Add(15 * time.Second)
+			var res string
+			for time.Now().Before(deadline) {
+				err := chromedp.Run(s.TargetCtx,
+					chromedp.Evaluate(`
+						(function() {
+							let btns = Array.from(document.querySelectorAll('button, div[role="button"], span'));
+							let joinBtn = btns.find(b => b.innerText && (b.innerText.toLowerCase().includes('join now') || b.innerText.toLowerCase().includes('ask to join') || b.innerText.toLowerCase().includes('join anyway')) && b.offsetWidth > 0 && b.offsetHeight > 0);
+							if (joinBtn) {
+								let clickable = joinBtn.closest('button') || joinBtn.closest('div[role="button"]') || joinBtn;
+								if (clickable.disabled || clickable.getAttribute('aria-disabled') === 'true') {
+									return "disabled";
+								}
+								clickable.id = 'bot-join-button';
+								return "found";
+							}
+							return "not found";
+						})();
+					`, &res),
+				)
+				if err == nil && res == "found" {
+					break
+				}
+				time.Sleep(1 * time.Second)
+			}
+
+			if res != "found" {
+				return fmt.Errorf("join button not found or enabled in time, last state: %s", res)
+			}
+
+			err := chromedp.Run(s.TargetCtx,
+				chromedp.Click(`#bot-join-button`, chromedp.ByQuery),
+				chromedp.Sleep(3*time.Second),
+			)
+			if err != nil {
+				return fmt.Errorf("failed to click join button: %w", err)
+			}
+			return nil
+		},
+	}
+
 	// Link nodes
 	InitServerNode.Next = []*Node{AuthNode}
 	AuthNode.Next = []*Node{CalendarNode}
 	CalendarNode.Next = []*Node{InitCDPNode}
 	InitCDPNode.Next = []*Node{StartMeetNode}
-	StartMeetNode.Next = []*Node{FinishedMeetNode, InMeetingNode}
-	FinishedMeetNode.Next = []*Node{NavigateToMeeting, InMeetingNode}
+	StartMeetNode.Next = []*Node{FinishedMeetNode, JoinMeetingNode, InMeetingNode}
+	FinishedMeetNode.Next = []*Node{NavigateToMeeting, JoinMeetingNode, InMeetingNode}
+	JoinMeetingNode.Next = []*Node{InMeetingNode, FinishedMeetNode}
 	InMeetingNode.Next = []*Node{FinishedMeetNode, NavigateToMeeting}
-	NavigateToMeeting.Next = []*Node{InMeetingNode, FinishedMeetNode}
+	NavigateToMeeting.Next = []*Node{JoinMeetingNode, InMeetingNode, FinishedMeetNode}
 
 	return InitServerNode
 }
