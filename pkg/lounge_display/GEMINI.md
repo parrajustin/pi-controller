@@ -47,3 +47,29 @@ When running this container (especially on systems using Docker Desktop), the co
 However, during the Google OAuth flow, the `setup_server` needs to generate an authorization URL with a specific `redirect_uri` that points back to the device. If the server uses the Docker VM IP, the OAuth flow will fail because your browser cannot reach `192.168.65.x`.
 
 To resolve this, the Docker container **requires** the `HOST_IP` environment variable to be set to your actual network IP (e.g., `192.168.1.100`). The `setup_server` explicitly reads this variable to construct a functional `redirect_uri` that your browser and Google can use to return the authorization token. The `run.sh` script handles this injection automatically.
+
+## Node Engine Architecture
+
+Both `setup_server` and `display_server` use a highly extensible state machine (Node Engine) for browser automation and application progression. Instead of relying on a single large procedure, logic is broken up into discrete `Node` components.
+
+### Core Node Lifecycle
+1. **Setup**: Runs exactly once when entering the node (useful for mounting HTTP endpoints).
+2. **Work**: The core execution logic for that state (e.g., extracting an auth code, interacting with the DOM).
+3. **DoneCheck**: Evaluates if this specific stage's goal is complete. If it fails, the engine safely restarts back to the `DefaultNode`.
+4. **PreCheck (Next Nodes)**: Evaluates possible paths forward from a node's `Next` array. The engine automatically navigates to the first node whose `PreCheck` returns `true`.
+5. **Teardown**: Cleanup operations before transitioning to the next node.
+
+### Rest Nodes & Timeouts
+Because some stages require indefinite waiting (e.g., human user input, or sitting in a Google Meet), nodes can be explicitly marked as `IsRestNode: true`.
+- **Rest Nodes**: Instead of causing an infinite evaluation loop that spams terminal logs, Rest Nodes instruct the engine to cleanly pause execution while waiting for a valid forward transition (`Next`). While resting, the engine continuously verifies that the current node's `PreCheck` remains valid; if it fails, the engine seamlessly resets. Rest Nodes ignore timeouts.
+- **Normal Nodes**: Any non-rest node is strictly bounded by `s.NodeTimeout` (configured to 10-20 minutes). If a non-rest node fails to transition to a new node before the timeout expires, the engine aborts the hanging process and resets to `DefaultNode`.
+
+### Automated Dumps & Artifacts
+When transitioning between nodes, the engine automatically leverages Chrome CDP to capture `.png` screenshots and `.html` DOM snapshots (`pre` and `post` Work execution). These artifacts are saved into the `logs/` directory sequentially (e.g., `0008_display_join_meeting_page_pre_screenshot.png`), providing a perfect visual timeline of exactly what the headless browser experienced.
+
+## Chrome CDP & Google Meet Automation
+
+Google Meet employs advanced anti-bot heuristics in its UI. Specifically, its interactive elements (like the "Join anyway" or "Ask to join" buttons) actively inspect the `isTrusted` property on JavaScript events.
+* **Avoid `.click()`**: Using standard JavaScript evaluation in `chromedp.Evaluate` (e.g. `document.querySelector('button').click()`) will fail silently in Meet because the simulated event is untrusted.
+* **CDP Clicks**: You MUST use low-level CDP commands like `chromedp.Click` (`Input.dispatchMouseEvent`). This directly commands the Chrome binary to perform a hardware-level click on the element, effortlessly bypassing `isTrusted` validation. 
+* **State Polling**: Meet UI components are heavily dynamic. When navigating to a meeting, the engine uses robust polling loops (using JS evaluation injected into the page) to patiently wait for target buttons to drop their `disabled` or `aria-disabled="true"` flags before initiating the trusted CDP click.
