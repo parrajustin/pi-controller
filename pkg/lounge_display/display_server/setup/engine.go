@@ -224,6 +224,7 @@ func RunEngine(startNode *Node, s *StateContext) {
 			}
 
 			if nextNode != nil {
+				log.Printf("Selected next node: %s\n", nextNode.Name)
 				break
 			}
 

@@ -35,16 +35,16 @@ func InitNodes() *Node {
 	EmailInputNode.Next = []*Node{PasswordInputNode}
 	PasswordInputNode.Next = []*Node{TwoFactorNode, WrongPasswordNode, StartMeetNode}
 	WrongPasswordNode.Next = []*Node{PasswordInputNode}
-	TwoFactorNode.Next = []*Node{FinishedMeetNode, JoinMeetingNode, InMeetingNode}
+	TwoFactorNode.Next = []*Node{FinishedMeetNode, CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode}
 
 	// 2. Display Nodes (from display_nodes.go)
 	InitCDPNode.Next = []*Node{StartMeetNode}
-	StartMeetNode.Next = []*Node{WorkspaceRedirectedNode, FinishedMeetNode, JoinMeetingNode, InMeetingNode, NavigateToMeeting}
-	FinishedMeetNode.Next = []*Node{NavigateToMeeting, JoinMeetingNode, InMeetingNode}
-	JoinMeetingNode.Next = []*Node{InMeetingNode, FinishedMeetNode}
-	InMeetingNode.Next = []*Node{FinishedMeetNode, NavigateToMeeting, LeaveMeetingNode}
+	StartMeetNode.Next = []*Node{WorkspaceRedirectedNode, FinishedMeetNode, CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode, NavigateToMeeting}
+	FinishedMeetNode.Next = []*Node{CheckInvalidMeetingNode, NavigateToMeeting, JoinMeetingNode, InMeetingNode}
+	JoinMeetingNode.Next = []*Node{CheckInvalidMeetingNode, InMeetingNode, FinishedMeetNode}
+	InMeetingNode.Next = []*Node{CheckInvalidMeetingNode, FinishedMeetNode, NavigateToMeeting, LeaveMeetingNode}
 	LeaveMeetingNode.Next = []*Node{StartMeetNode}
-	NavigateToMeeting.Next = []*Node{JoinMeetingNode, InMeetingNode, FinishedMeetNode}
+	NavigateToMeeting.Next = []*Node{CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode, FinishedMeetNode}
 
 	return InitServerNode
 }

@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"net/url"
 	"os"
@@ -19,8 +20,9 @@ var (
 	FinishedMeetNode  *Node
 	NavigateToMeeting *Node
 	JoinMeetingNode   *Node
-	InMeetingNode     *Node
-	LeaveMeetingNode  *Node
+	InMeetingNode           *Node
+	LeaveMeetingNode        *Node
+	CheckInvalidMeetingNode *Node
 )
 
 func init() {
@@ -110,6 +112,34 @@ func init() {
 			u, err := url.Parse(urlStr)
 			return err == nil && u.Host == "meet.google.com" && (u.Path == "/" || u.Path == "/new" || u.Path == "")
 		},
+		Work: func(s *StateContext) error {
+			var urlStr string
+			_ = chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			log.Printf("Entered Finished Meet. Current URL: %s\n", urlStr)
+			return nil
+		},
+	}
+
+	CheckInvalidMeetingNode = &Node{
+		Name: "Check Invalid Meeting",
+		PreCheck: func(s *StateContext) bool {
+			var urlStr string
+			err := chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			if err != nil {
+				return false
+			}
+			u, err := url.Parse(urlStr)
+			return err == nil && u.Host == "meet.google.com" && strings.HasPrefix(u.Path, "/_meet/")
+		},
+		Work: func(s *StateContext) error {
+			s.mu.Lock()
+			s.MeetingCode = ""
+			s.mu.Unlock()
+			return nil
+		},
+		DoneCheck: func(s *StateContext) error {
+			return fmt.Errorf("invalid meeting URL detected, redirecting to default node")
+		},
 	}
 
 	InMeetingNode = &Node{
@@ -129,7 +159,7 @@ func init() {
 				return false
 			}
 			u, err := url.Parse(urlStr)
-			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" {
+			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" || strings.HasPrefix(u.Path, "/_meet/") {
 				return false
 			}
 
@@ -146,6 +176,7 @@ func init() {
 		Work: func(s *StateContext) error {
 			var urlStr string
 			_ = chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			log.Printf("Entered In Meeting. Current URL: %s\n", urlStr)
 			u, _ := url.Parse(urlStr)
 			if u != nil {
 				s.mu.Lock()
@@ -225,7 +256,7 @@ func init() {
 				return false
 			}
 			u, err := url.Parse(urlStr)
-			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" {
+			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" || strings.HasPrefix(u.Path, "/_meet/") {
 				return false
 			}
 

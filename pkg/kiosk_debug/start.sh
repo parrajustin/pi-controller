@@ -45,7 +45,7 @@ DISPLAY=:0 chromium \
   --user-data-dir="$CHROME_DATA_DIR" \
   --window-size=1536,960 \
   --window-position=0,0 \
-  "$LAUNCH_URL" &
+  "$LAUNCH_URL" > /dev/null 2>&1 &
 
 # --enable-logging=stderr \rr \
 # --v=1 \
