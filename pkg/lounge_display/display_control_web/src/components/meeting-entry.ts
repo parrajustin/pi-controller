@@ -14,8 +14,51 @@ export interface Meeting {
 @customElement('meeting-entry')
 export class MeetingEntry extends LitElement {
   @property({ type: Object }) meeting!: Meeting;
+  @property({ type: Boolean, reflect: true }) isLoading = false;
+  @property({ type: Boolean, reflect: true }) isSelected = false;
 
   static styles = css`
+    :host {
+      display: block;
+      transition: all 0.5s cubic-bezier(0.4, 0.0, 0.2, 1);
+      max-height: 150px;
+      opacity: 1;
+      overflow: hidden;
+      margin: 0;
+    }
+    :host([isloading]:not([isselected])) {
+      max-height: 0;
+      opacity: 0;
+      pointer-events: none;
+      margin: 0;
+    }
+    :host([isloading]) .meeting-row {
+      pointer-events: none;
+    }
+    :host([isselected]) {
+      overflow: visible;
+      z-index: 10;
+    }
+    :host([isselected]) .meeting-row {
+      border: 2px solid var(--active-text);
+      box-shadow: 0 0 0 0 rgba(168, 199, 250, 0.7);
+      animation: pulse 1.5s infinite;
+      border-radius: 16px;
+    }
+    @keyframes pulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(168, 199, 250, 0.8),
+                    0 0 0 0 rgba(168, 199, 250, 0.8);
+      }
+      50% {
+        box-shadow: 0 0 0 40px rgba(168, 199, 250, 0.4),
+                    0 0 0 0 rgba(168, 199, 250, 0.8);
+      }
+      100% {
+        box-shadow: 0 0 0 80px rgba(168, 199, 250, 0),
+                    0 0 0 40px rgba(168, 199, 250, 0);
+      }
+    }
     .meeting-row {
       display: flex;
       align-items: center;
@@ -25,6 +68,7 @@ export class MeetingEntry extends LitElement {
       position: relative; /* Needed for ripple */
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
+      transition: all 0.3s ease;
     }
     :host(:last-child) .meeting-row {
       border-bottom: none;
@@ -63,16 +107,16 @@ export class MeetingEntry extends LitElement {
   `;
 
   private async handleJoinMeeting() {
+    if (this.isLoading) return; // Prevent clicks while transitioning
+
     if (this.meeting.meetCode) {
-      try {
-        await fetch('/api/join_meeting', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: this.meeting.meetCode }),
-        });
-      } catch (e) {
-        console.error('Failed to join meeting:', e);
-      }
+      this.dispatchEvent(
+        new CustomEvent('join-meeting-start', {
+          detail: { code: this.meeting.meetCode },
+          bubbles: true,
+          composed: true,
+        })
+      );
     }
   }
 

@@ -1,11 +1,12 @@
 import { LitElement, html, css } from 'lit';
-import { customElement, state, query } from 'lit/decorators.js';
+import { customElement, state, query, property } from 'lit/decorators.js';
 import './icon-button.js';
 import './virtual-keyboard.js';
 import { KeyPressedEvent } from './virtual-keyboard.js';
 
 @customElement('bottom-bar')
 export class BottomBar extends LitElement {
+  @property({ type: Boolean }) isLoading = false;
   @state() private showKeyboard = false;
   @state() private inputValue = '';
 
@@ -13,6 +14,16 @@ export class BottomBar extends LitElement {
   @query('.overlay-input') private overlayInput!: HTMLInputElement;
 
   static styles = css`
+    :host {
+      display: block;
+      transition: opacity 0.5s ease;
+      opacity: 1;
+    }
+    :host([isloading]) {
+      opacity: 0;
+      pointer-events: none;
+    }
+
     .bottom-bar {
       display: flex;
       justify-content: center;
@@ -179,15 +190,18 @@ export class BottomBar extends LitElement {
     }
   }
 
-  private submitCode() {
-    if (!this.inputValue.trim()) return;
-    fetch('/api/join_meeting', {
-      method: 'POST',
-      body: JSON.stringify({ code: this.inputValue.trim() }),
-      headers: { 'Content-Type': 'application/json' }
-    }).catch(console.error);
-    this.closeKeyboard();
-    this.inputValue = '';
+  private async submitCode() {
+    if (this.inputValue.trim()) {
+      this.dispatchEvent(
+        new CustomEvent('join-meeting-start', {
+          detail: { code: this.inputValue.trim() },
+          bubbles: true,
+          composed: true,
+        })
+      );
+      this.inputValue = '';
+      this.showKeyboard = false;
+    }
   }
 
   private handleKeyPress(e: CustomEvent<KeyPressedEvent>) {

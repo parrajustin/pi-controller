@@ -27,6 +27,33 @@ export class LoungeDisplay extends LitElement {
       margin: 0 auto;
       padding: 16px;
       box-sizing: border-box;
+      position: relative;
+    }
+
+    .loading-bg {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: -1;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+      background: repeating-linear-gradient(
+        45deg,
+        var(--bg-color) 0,
+        var(--bg-color) 40px,
+        rgba(168, 199, 250, 0.05) 40px,
+        rgba(168, 199, 250, 0.05) 80px
+      );
+      background-size: 113px 113px; /* 80 * sqrt(2) approx */
+    }
+
+    .loading-bg.active {
+      opacity: 1;
+      animation: stripe-swipe 2s linear infinite;
+    }
+
+    @keyframes stripe-swipe {
+      0% { background-position: 0 0; }
+      100% { background-position: 113px 113px; }
     }
 
     /* Header */
@@ -150,15 +177,15 @@ export class LoungeDisplay extends LitElement {
     }
   `;
 
-  @state() private serverState = { current_node: '', meeting_code: '' };
+  @state() private serverState: Record<string, any> = {};
   @state() private meetingState = { microphone: false, camera: false, hand: false, in_meeting: false };
 
   @state() private currentTime = new Date();
+  @state() private meetings: Meeting[] = [];
+  @state() private optimisticLoadingCode: string | null = null;
+  private optimisticLoadingTimeout: number | null = null;
+
   private timer?: ReturnType<typeof setInterval>;
-
-  @state()
-  private meetings: Meeting[] = [];
-
   private fetchTimer?: ReturnType<typeof setInterval>;
   private fetchTimeout?: ReturnType<typeof setTimeout>;
 
@@ -248,6 +275,40 @@ export class LoungeDisplay extends LitElement {
     } catch (e) {
       console.error('Failed to click button', e);
     }
+    
+    // Clear optimistic loading if we actually reached the meeting!
+    if (data.current_node === 'In Meeting') {
+      this.clearOptimisticLoading();
+    }
+  }
+
+  private clearOptimisticLoading() {
+    this.optimisticLoadingCode = null;
+    if (this.optimisticLoadingTimeout !== null) {
+      window.clearTimeout(this.optimisticLoadingTimeout);
+      this.optimisticLoadingTimeout = null;
+    }
+  }
+
+  private async handleJoinMeetingStart(e: CustomEvent<{ code: string }>) {
+    const code = e.detail.code;
+    if (!code) return;
+
+    this.clearOptimisticLoading();
+    this.optimisticLoadingCode = code;
+    this.optimisticLoadingTimeout = window.setTimeout(() => {
+      this.clearOptimisticLoading();
+    }, 30000);
+
+    try {
+      await fetch('/api/join_meeting', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+    } catch (err) {
+      console.error('Failed to join meeting:', err);
+    }
   }
 
   disconnectedCallback() {
@@ -299,7 +360,12 @@ export class LoungeDisplay extends LitElement {
     const startIndex = Math.max(0, firstFutureOrActiveIndex - 1);
     const displayedMeetings = this.meetings.slice(startIndex);
 
+    const serverIsLoading = !!this.serverState.meeting_code && this.serverState.meeting_code !== 'landing' && this.serverState.current_node !== 'In Meeting';
+    const isLoading = this.optimisticLoadingCode !== null || serverIsLoading;
+    const selectedCode = this.optimisticLoadingCode || this.serverState.meeting_code;
+
     return html`
+      <div class="loading-bg ${isLoading ? 'active' : ''}"></div>
       <div class="header">
         <div class="header-left">
           <div class="meet-icon">
@@ -341,12 +407,12 @@ export class LoungeDisplay extends LitElement {
             `
           : html`
               ${displayedMeetings.length > 0
-                ? html`<meeting-list .meetings=${displayedMeetings}></meeting-list>`
+                ? html`<meeting-list @join-meeting-start=${this.handleJoinMeetingStart} .meetings=${displayedMeetings} ?isLoading=${isLoading} .selectedCode=${selectedCode}></meeting-list>`
                 : html`<div class="no-events-card">
                     No calendar events found! Time to sit back for refreshment and repose!
                   </div>`
               }
-              <bottom-bar></bottom-bar>
+              <bottom-bar @join-meeting-start=${this.handleJoinMeetingStart} ?isLoading=${isLoading}></bottom-bar>
             `
       }
     `;
