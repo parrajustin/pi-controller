@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Upload Credentials</title>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #202124;
+      --card-bg: #303134;
+      --text-primary: #e8eaed;
+      --text-secondary: #9aa0a6;
+      --accent: #8ab4f8;
+      --accent-hover: #aecbfa;
+      --error: #f28b82;
+      --success: #81c995;
+    }
+    
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--bg-color);
+      color: var(--text-primary);
+      font-family: 'Roboto', sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    .container {
+      background-color: var(--card-bg);
+      padding: 32px;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      text-align: center;
+      max-width: 400px;
+      width: 100%;
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 24px;
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: var(--text-secondary);
+      font-size: 14px;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+
+    .file-input-wrapper {
+      position: relative;
+      overflow: hidden;
+      display: inline-block;
+      margin-bottom: 16px;
+    }
+
+    .file-input-wrapper input[type=file] {
+      font-size: 100px;
+      position: absolute;
+      left: 0;
+      top: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+
+    .btn {
+      background-color: var(--accent);
+      color: #202124;
+      border: none;
+      padding: 10px 24px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      font-family: inherit;
+    }
+
+    .btn:hover {
+      background-color: var(--accent-hover);
+    }
+
+    .btn:disabled {
+      background-color: var(--text-secondary);
+      cursor: not-allowed;
+    }
+
+    #fileName {
+      font-size: 14px;
+      color: var(--accent);
+      margin-bottom: 24px;
+      min-height: 20px;
+      word-break: break-all;
+    }
+
+    .message {
+      margin-top: 16px;
+      font-size: 14px;
+      font-weight: 500;
+      min-height: 20px;
+    }
+
+    .error { color: var(--error); }
+    .success { color: var(--success); }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Upload Credentials</h1>
+    <p>Please select your Google OAuth <code>credentials.json</code> file to proceed with the display setup.</p>
+    
+    <div class="file-input-wrapper">
+      <button class="btn" type="button">Select File</button>
+      <input type="file" id="fileInput" accept=".json" />
+    </div>
+    
+    <div id="fileName">No file selected</div>
+    
+    <button class="btn" id="uploadBtn" disabled>Upload to Display</button>
+    <div id="message" class="message"></div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const fileNameDisplay = document.getElementById('fileName');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const messageDisplay = document.getElementById('message');
+
+    let selectedFile = null;
+
+    fileInput.addEventListener('change', (e) => {
+      messageDisplay.textContent = '';
+      if (e.target.files.length > 0) {
+        selectedFile = e.target.files[0];
+        fileNameDisplay.textContent = selectedFile.name;
+        uploadBtn.disabled = false;
+      } else {
+        selectedFile = null;
+        fileNameDisplay.textContent = 'No file selected';
+        uploadBtn.disabled = true;
+      }
+    });
+
+    uploadBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+
+      uploadBtn.disabled = true;
+      messageDisplay.className = 'message';
+      messageDisplay.textContent = 'Uploading...';
+
+      try {
+        const content = await selectedFile.text();
+        
+        // Basic validation
+        try {
+          JSON.parse(content);
+        } catch (e) {
+          throw new Error("Invalid JSON file");
+        }
+
+        const res = await fetch('/api/cred', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: content
+        });
+
+        if (res.ok) {
+          messageDisplay.className = 'message success';
+          messageDisplay.textContent = 'Upload successful! Please look at the display.';
+          fileInput.value = '';
+          selectedFile = null;
+          fileNameDisplay.textContent = 'No file selected';
+        } else {
+          throw new Error('Server returned ' + res.status);
+        }
+      } catch (err) {
+        messageDisplay.className = 'message error';
+        messageDisplay.textContent = 'Error: ' + err.message;
+        uploadBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

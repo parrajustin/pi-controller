@@ -1,9 +1,9 @@
 import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
-import { Meeting } from './components/meeting-entry.js';
-import './components/meeting-list.js';
-import './components/bottom-bar.js';
-import splashImg from '../splash.png';
+import { Meeting } from './meeting-entry.js';
+import './meeting-list.js';
+import './bottom-bar.js';
+import splashImg from '../../splash.png';
 import { parse, isWithinInterval, format, addSeconds, parseISO } from 'date-fns';
 
 interface EventInfo {
@@ -25,6 +25,7 @@ export class LoungeDisplay extends LitElement {
       width: 100%;
       max-width: 1200px;
       margin: 0 auto;
+      padding: 16px;
       box-sizing: border-box;
     }
 

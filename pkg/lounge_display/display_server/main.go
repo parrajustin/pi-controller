@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -35,6 +39,33 @@ func applyHeaders(h http.Handler) http.Handler {
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
 
+		h.ServeHTTP(w, r)
+	})
+}
+
+// loggingMiddleware logs incoming API requests and their parameters, masking sensitive endpoints
+func loggingMiddleware(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") {
+			if r.Method == http.MethodGet && (r.URL.Path == "/api/state" || r.URL.Path == "/api/status" || r.URL.Path == "/api/meeting/button_state" || r.URL.Path == "/api/calendar_events" || r.URL.Path == "/api/ip" || r.URL.Path == "/api/has_wifi") {
+				// Skip noisy polling endpoints
+			} else if r.URL.Path == "/api/password" || strings.Contains(r.URL.Path, "password") {
+				log.Printf("[API] %s %s (body hidden)\n", r.Method, r.URL.Path)
+			} else {
+				var bodyBytes []byte
+				if r.Body != nil {
+					bodyBytes, _ = io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
+				}
+				params := r.URL.Query().Encode()
+				bodyStr := string(bodyBytes)
+				if bodyStr != "" || params != "" {
+					log.Printf("[API] %s %s | query: %s | body: %s\n", r.Method, r.URL.Path, params, bodyStr)
+				} else {
+					log.Printf("[API] %s %s\n", r.Method, r.URL.Path)
+				}
+			}
+		}
 		h.ServeHTTP(w, r)
 	})
 }
@@ -98,9 +129,29 @@ func fetchCalendarEvents(srv *calendar.Service) ([]EventInfo, error) {
 	return results, nil
 }
 
+func getLocalIP() string {
+	if hostIP := os.Getenv("HOST_IP"); hostIP != "" {
+		return hostIP
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	for _, address := range addrs {
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				return ipnet.IP.String()
+			}
+		}
+	}
+	return ""
+}
+
 func main() {
 	dirFlag := flag.String("dir", ".", "the directory to serve")
 	portFlag := flag.String("port", "8080", "the port to listen on")
+	receiverFlag := flag.String("receiver", "", "path to oauth receiver binary (optional)")
+	emailFlag := flag.String("email", "lounge.room@mountainviewmasoniclodge.com", "Google email address")
 	flag.Parse()
 
 	encKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
@@ -125,12 +176,16 @@ func main() {
 	mux := http.NewServeMux()
 
 	stateCtx := &setup.StateContext{
-		Mux:         mux,
-		DirFlag:     dir,
-		PortFlag:    *portFlag,
-		EncKey:      encKey,
-		OauthDir:    oauthDir,
-		NodeTimeout: 10 * time.Minute,
+		Mux:              mux,
+		DirFlag:          dir,
+		PortFlag:         *portFlag,
+		EncKey:           encKey,
+		OauthDir:         oauthDir,
+		NodeTimeout:      10 * time.Minute,
+		PasswordChan:     make(chan string, 1),
+		Email:            *emailFlag,
+		ReceiverFlag:     *receiverFlag,
+		RegisteredRoutes: make(map[string]bool),
 	}
 
 	// Start the server in a goroutine
@@ -139,6 +194,7 @@ func main() {
 		fs := http.FileServer(http.Dir(dir))
 		mux.Handle("/", fs)
 		handler := applyHeaders(mux)
+		handler = loggingMiddleware(handler)
 		if err := http.ListenAndServe(":"+*portFlag, handler); err != nil {
 			log.Fatal(err)
 		}
@@ -153,6 +209,38 @@ func main() {
 			"current_node": stateCtx.GetNodeName(),
 			"meeting_code": stateCtx.MeetingCode,
 		})
+	})
+	
+	mux.HandleFunc("/api/ip", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		ip := os.Getenv("HOST_IP")
+		if ip == "" {
+			ip = getLocalIP()
+		}
+		json.NewEncoder(w).Encode(map[string]string{"ip": ip})
+	})
+	
+	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		status := "pending"
+		ready := stateCtx.GetSetupReady()
+		if ready {
+			status = "ready"
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": status})
+	})
+	
+	mux.HandleFunc("/api/has_wifi", func(w http.ResponseWriter, r *http.Request) {
+		client := http.Client{Timeout: 3 * time.Second}
+		_, err := client.Get("https://google.com")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"internetAccess": err == nil})
+	})
+	
+	mux.HandleFunc("/auth/finalize", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"success":true}`))
+		stateCtx.SetSetupReady(true)
 	})
 
 	mux.HandleFunc("/api/calendar_events", func(w http.ResponseWriter, r *http.Request) {

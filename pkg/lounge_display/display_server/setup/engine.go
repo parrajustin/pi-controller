@@ -37,6 +37,12 @@ type StateContext struct {
 	LogsDir     string
 	StepCounter int
 	NodeTimeout time.Duration
+
+	RegisteredRoutes map[string]bool
+	Email            string
+	PasswordChan     chan string
+	ReceiverFlag     string
+	SetupReady       bool
 }
 
 func (s *StateContext) SetNodeName(name string) {
@@ -55,6 +61,30 @@ func (s *StateContext) SetNavTarget(target string, opts map[string]interface{}) 
 	defer s.mu.Unlock()
 	s.NavTarget = target
 	s.NavOpts = opts
+}
+
+func RegisterRoute(s *StateContext, path string, handler http.HandlerFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.RegisteredRoutes == nil {
+		s.RegisteredRoutes = make(map[string]bool)
+	}
+	if !s.RegisteredRoutes[path] {
+		s.Mux.HandleFunc(path, handler)
+		s.RegisteredRoutes[path] = true
+	}
+}
+
+func (s *StateContext) GetSetupReady() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SetupReady
+}
+
+func (s *StateContext) SetSetupReady(ready bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.SetupReady = ready
 }
 
 type Node struct {
@@ -114,6 +144,15 @@ func RunEngine(startNode *Node, s *StateContext) {
 		s.StepCounter++
 		fmt.Printf("\n=== Executing Node %04d: %s ===\n", s.StepCounter, currentNode.Name)
 		s.SetNodeName(currentNode.Name)
+
+		// If we reach a state where the display is ready to show meeting controls, set SetupReady to true
+		if currentNode.Name == "Finished Meet" ||
+			currentNode.Name == "In Meeting" ||
+			currentNode.Name == "NavigateToMeeting" ||
+			currentNode.Name == "Join Meeting Page" ||
+			currentNode.Name == "Leave Meeting" {
+			s.SetSetupReady(true)
+		}
 
 		if currentNode.Setup != nil {
 			err := currentNode.Setup(s)

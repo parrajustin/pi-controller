@@ -19,6 +19,7 @@ services:
       context: ./lounge_display
       additional_contexts:
         token_receiver: ./token_receiver
+        standard_ts_lib: ../../standard-ts-lib
     container_name: lounge_display
     ports:
       - "8080:8080"

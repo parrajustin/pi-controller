@@ -173,6 +173,23 @@ export class BottomBar extends LitElement {
     this.inputValue = input.value;
   }
 
+  private handleKeyDown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      this.submitCode();
+    }
+  }
+
+  private submitCode() {
+    if (!this.inputValue.trim()) return;
+    fetch('/api/join_meeting', {
+      method: 'POST',
+      body: JSON.stringify({ code: this.inputValue.trim() }),
+      headers: { 'Content-Type': 'application/json' }
+    }).catch(console.error);
+    this.closeKeyboard();
+    this.inputValue = '';
+  }
+
   private handleKeyPress(e: CustomEvent<KeyPressedEvent>) {
     const key = e.detail.key;
     const input = this.overlayInput;
@@ -182,8 +199,11 @@ export class BottomBar extends LitElement {
     let end = input.selectionEnd || 0;
     let val = this.inputValue;
 
-    if (key === 'Dismiss' || key === 'Enter') {
+    if (key === 'Dismiss') {
       this.closeKeyboard();
+      return;
+    } else if (key === 'Enter') {
+      this.submitCode();
       return;
     } else if (key === 'Backspace') {
       if (start === end && start > 0) {
@@ -232,6 +252,7 @@ export class BottomBar extends LitElement {
                     placeholder="Enter a code or nickname"
                     .value=${this.inputValue}
                     @input=${this.handleNativeInput}
+                    @keydown=${this.handleKeyDown}
                   />
                 </div>
 
@@ -260,6 +281,7 @@ export class BottomBar extends LitElement {
               .value=${this.inputValue}
               @focus=${this.handleFocus}
               @input=${this.handleNativeInput}
+              @keydown=${this.handleKeyDown}
             />
           </div>
 

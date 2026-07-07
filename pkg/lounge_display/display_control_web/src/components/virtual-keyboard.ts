@@ -10,10 +10,10 @@ export class VirtualKeyboard extends LitElement {
   static styles = css`
     :host {
       display: block;
-      background-color: #f1f3f4;
+      background-color: var(--card-bg, #28292c);
       padding: 16px;
       border-radius: 16px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
       width: 100%;
       max-width: 800px;
       user-select: none;
@@ -30,8 +30,8 @@ export class VirtualKeyboard extends LitElement {
     }
 
     .key {
-      background-color: #ffffff;
-      border: 1px solid #dadce0;
+      background-color: var(--input-bg, #303134);
+      border: 1px solid var(--card-border, #3c4043);
       border-radius: 8px;
       height: 56px;
       min-width: 48px;
@@ -42,17 +42,17 @@ export class VirtualKeyboard extends LitElement {
       align-items: center;
       font-size: 1.25rem;
       font-weight: 500;
-      color: #3c4043;
+      color: var(--text-primary, #e8eaed);
       cursor: pointer;
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
       transition: background-color 0.1s;
       -webkit-tap-highlight-color: transparent;
     }
     .key:hover {
-      background-color: #f8f9fa;
+      background-color: var(--card-border, #3c4043);
     }
     .key:active {
-      background-color: #e8eaed;
+      background-color: var(--btn-bg, #494c50);
       box-shadow: none;
       transform: translateY(1px);
     }

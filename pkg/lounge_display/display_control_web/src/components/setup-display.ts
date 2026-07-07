@@ -4,11 +4,11 @@ import '@material/web/progress/linear-progress.js';
 import '@material/web/checkbox/checkbox.js';
 import '@material/web/textfield/outlined-text-field.js';
 import '@material/web/button/filled-button.js';
-import splashImg from '../splash.png';
+import splashImg from '../../splash.png';
 import { WrapPromise } from 'standard-ts-lib/src/wrap_promise.js';
 import QRCode from 'qrcode';
-import './components/virtual-keyboard.js';
-import { KeyPressedEvent } from './components/virtual-keyboard.js';
+import './virtual-keyboard.js';
+import { KeyPressedEvent } from './virtual-keyboard.js';
 
 @customElement('setup-display')
 export class SetupDisplay extends LitElement {
