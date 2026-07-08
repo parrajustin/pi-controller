@@ -86,9 +86,9 @@ func init() {
 			return nil
 		},
 		Work: func(s *StateContext) error {
-			fmt.Println("Navigating to https://meet.google.com")
+			fmt.Println("Navigating to https://meet.google.com/landing")
 			return chromedp.Run(s.TargetCtx,
-				chromedp.Navigate("https://meet.google.com"),
+				chromedp.Navigate("https://meet.google.com/landing"),
 				chromedp.Sleep(4*time.Second),
 			)
 		},
@@ -111,7 +111,16 @@ func init() {
 				return false
 			}
 			u, err := url.Parse(urlStr)
-			return err == nil && u.Host == "meet.google.com" && (u.Path == "/" || u.Path == "/new" || u.Path == "")
+			return err == nil && u.Host == "meet.google.com" && u.Path == "/landing"
+		},
+		RestNodeValidation: func(s *StateContext) bool {
+			var urlStr string
+			err := chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			if err != nil {
+				return false
+			}
+			u, err := url.Parse(urlStr)
+			return err == nil && u.Host == "meet.google.com" && u.Path == "/landing"
 		},
 		Setup: func(s *StateContext) error {
 			s.AddWSHandler("join_meeting", func(payload json.RawMessage) (interface{}, error) {
@@ -179,7 +188,7 @@ func init() {
 				return false
 			}
 			u, err := url.Parse(urlStr)
-			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" || strings.HasPrefix(u.Path, "/_meet/") {
+			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" || u.Path == "/landing" || strings.HasPrefix(u.Path, "/_meet/") {
 				return false
 			}
 
@@ -350,7 +359,7 @@ func init() {
 				return false
 			}
 			u, err := url.Parse(urlStr)
-			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" || strings.HasPrefix(u.Path, "/_meet/") {
+			if err != nil || u.Host != "meet.google.com" || u.Path == "/" || u.Path == "/new" || u.Path == "" || u.Path == "/landing" || strings.HasPrefix(u.Path, "/_meet/") {
 				return false
 			}
 

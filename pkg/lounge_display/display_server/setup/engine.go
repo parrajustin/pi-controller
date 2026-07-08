@@ -198,14 +198,15 @@ func (s *StateContext) SetSetupReady(ready bool) {
 }
 
 type Node struct {
-	Name       string
-	IsRestNode bool
-	Setup      func(s *StateContext) error
-	PreCheck   func(s *StateContext) bool
-	Work      func(s *StateContext) error
-	DoneCheck func(s *StateContext) error
-	Teardown  func(s *StateContext) error
-	Next      []*Node
+	Name               string
+	IsRestNode         bool
+	RestNodeValidation func(s *StateContext) bool
+	Setup              func(s *StateContext) error
+	PreCheck           func(s *StateContext) bool
+	Work               func(s *StateContext) error
+	DoneCheck          func(s *StateContext) error
+	Teardown           func(s *StateContext) error
+	Next               []*Node
 }
 
 func captureDebugArtifacts(s *StateContext, stepName, phase, prefix string) {
@@ -345,10 +346,19 @@ func RunEngine(startNode *Node, s *StateContext) {
 			}
 
 			// If no next node matched, check if the current rest node is still valid
-			if currentNode.IsRestNode && currentNode.PreCheck != nil {
-				if !currentNode.PreCheck(s) {
-					fmt.Printf("Rest node %s condition is no longer valid.\n", currentNode.Name)
-					break
+			if currentNode.IsRestNode {
+				if currentNode.RestNodeValidation != nil {
+					if !currentNode.RestNodeValidation(s) {
+						fmt.Printf("Rest node %s condition is no longer valid. Transitioning to default node.\n", currentNode.Name)
+						nextNode = s.DefaultNode
+						break
+					}
+				} else if currentNode.PreCheck != nil {
+					if !currentNode.PreCheck(s) {
+						fmt.Printf("Rest node %s condition is no longer valid. Transitioning to default node.\n", currentNode.Name)
+						nextNode = s.DefaultNode
+						break
+					}
 				}
 			}
 
