@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chromedp/chromedp"
+	"github.com/gorilla/websocket"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/display_server/setup"
 	"google.golang.org/api/calendar/v3"
 )
@@ -47,9 +47,7 @@ func applyHeaders(h http.Handler) http.Handler {
 func loggingMiddleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") {
-			if r.Method == http.MethodGet && (r.URL.Path == "/api/state" || r.URL.Path == "/api/status" || r.URL.Path == "/api/meeting/button_state" || r.URL.Path == "/api/calendar_events" || r.URL.Path == "/api/ip" || r.URL.Path == "/api/has_wifi") {
-				// Skip noisy polling endpoints
-			} else if r.URL.Path == "/api/password" || strings.Contains(r.URL.Path, "password") {
+			if r.URL.Path == "/api/password" || strings.Contains(r.URL.Path, "password") {
 				log.Printf("[API] %s %s (body hidden)\n", r.Method, r.URL.Path)
 			} else {
 				var bodyBytes []byte
@@ -68,6 +66,12 @@ func loggingMiddleware(h http.Handler) http.Handler {
 		}
 		h.ServeHTTP(w, r)
 	})
+}
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all origins for local display
+	},
 }
 
 type EventInfo struct {
@@ -202,192 +206,113 @@ func main() {
 
 	fmt.Println("Starting application APIs...")
 
-	// Register the application APIs
-	mux.HandleFunc("/api/state", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"current_node": stateCtx.GetNodeName(),
-			"meeting_code": stateCtx.MeetingCode,
-		})
-	})
-	
-	mux.HandleFunc("/api/ip", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		ip := os.Getenv("HOST_IP")
-		if ip == "" {
-			ip = getLocalIP()
+	// Register WebSocket endpoint
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			log.Printf("WS Upgrade error: %v", err)
+			return
 		}
-		json.NewEncoder(w).Encode(map[string]string{"ip": ip})
-	})
-	
-	mux.HandleFunc("/api/status", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		status := "pending"
-		ready := stateCtx.GetSetupReady()
-		if ready {
-			status = "ready"
+		
+		stateCtx.AddWSConn(conn)
+		defer stateCtx.RemoveWSConn(conn)
+		
+		// Send initial state
+		stateCtx.BroadcastState()
+
+		for {
+			_, msgBytes, err := conn.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					log.Printf("WS Read error: %v", err)
+				}
+				break
+			}
+
+			var req struct {
+				ID      string          `json:"id"`
+				Type    string          `json:"type"`
+				Payload json.RawMessage `json:"payload"`
+			}
+			if err := json.Unmarshal(msgBytes, &req); err != nil {
+				log.Printf("WS decode error: %v", err)
+				continue
+			}
+
+			var resPayload interface{}
+			var resErr error
+
+			// Global WS handlers
+			switch req.Type {
+			case "get_state":
+				log.Printf("[WS] Received message %q (ID: %s) -> Routing to Global handler", req.Type, req.ID)
+				resPayload = map[string]interface{}{
+					"current_node": stateCtx.GetNodeName(),
+					"meeting_code": stateCtx.MeetingCode,
+					"setup_ready":  stateCtx.GetSetupReady(),
+					"phase":        stateCtx.GetPhase(),
+					"setup_phase":  stateCtx.GetSetupPhase(),
+				}
+			case "get_ip":
+				log.Printf("[WS] Received message %q (ID: %s) -> Routing to Global handler", req.Type, req.ID)
+				ip := os.Getenv("HOST_IP")
+				if ip == "" {
+					ip = getLocalIP()
+				}
+				resPayload = map[string]string{"ip": ip}
+			case "get_status":
+				log.Printf("[WS] Received message %q (ID: %s) -> Routing to Global handler", req.Type, req.ID)
+				status := "pending"
+				if stateCtx.GetSetupReady() {
+					status = "ready"
+				}
+				resPayload = map[string]string{"status": status}
+			case "calendar_events":
+				log.Printf("[WS] Received message %q (ID: %s) -> Routing to Global handler", req.Type, req.ID)
+				events, err := fetchCalendarEvents(stateCtx.CalendarSrv)
+				if err != nil {
+					resErr = err
+				} else {
+					resPayload = events
+				}
+			default:
+				// Node-specific WS handlers
+				handler, ok := stateCtx.GetWSHandler(req.Type)
+
+				if ok {
+					log.Printf("[WS] Received message %q (ID: %s) -> Routing to Node handler", req.Type, req.ID)
+					resPayload, resErr = handler(req.Payload)
+				} else {
+					log.Printf("[WS] Received message %q (ID: %s) -> ERROR: Unknown handler", req.Type, req.ID)
+					resErr = fmt.Errorf("unknown message type: %s", req.Type)
+				}
+			}
+
+			// Send response if this request expects one (has an ID)
+			if req.ID != "" {
+				res := map[string]interface{}{
+					"id":   req.ID,
+					"type": "response",
+				}
+				if resErr != nil {
+					res["error"] = resErr.Error()
+				} else {
+					res["payload"] = resPayload
+				}
+				conn.WriteJSON(res)
+			}
 		}
-		json.NewEncoder(w).Encode(map[string]string{"status": status})
 	})
-	
-	mux.HandleFunc("/api/has_wifi", func(w http.ResponseWriter, r *http.Request) {
-		client := http.Client{Timeout: 3 * time.Second}
-		_, err := client.Get("https://google.com")
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"internetAccess": err == nil})
-	})
-	
+
 	mux.HandleFunc("/auth/finalize", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"success":true}`))
 		stateCtx.SetSetupReady(true)
 	})
 
-	mux.HandleFunc("/api/calendar_events", func(w http.ResponseWriter, r *http.Request) {
-		events, err := fetchCalendarEvents(stateCtx.CalendarSrv)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	mux.HandleFunc("/api/setup_done", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(events)
-	})
-
-	mux.HandleFunc("/api/join_meeting", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		var payload struct {
-			Code string `json:"code"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
-			return
-		}
-
-		if payload.Code == "" {
-			http.Error(w, "Meeting code is required", http.StatusBadRequest)
-			return
-		}
-
-		// Tell the engine to move to NavigateToMeeting node
-		stateCtx.SetNavTarget("NavigateToMeeting", map[string]interface{}{"code": payload.Code})
-
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"status": "ok"}`))
-	})
-
-	mux.HandleFunc("/api/meeting/button_state", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		
-		nodeName := stateCtx.GetNodeName()
-		if nodeName != "In Meeting" || stateCtx.TargetCtx == nil {
-			log.Printf("[/api/meeting/button_state] Not in meeting (Node: %s, TargetCtx exists: %v)\n", nodeName, stateCtx.TargetCtx != nil)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"in_meeting": false,
-				"microphone": false,
-				"camera":     false,
-				"hand":       false,
-			})
-			return
-		}
-
-		var stateJSON string
-		err := chromedp.Run(stateCtx.TargetCtx, chromedp.Evaluate(`
-			(function() {
-				let micBtn = document.querySelector('button[aria-label*="microphone" i]');
-				let camBtn = document.querySelector('button[aria-label*="camera" i]');
-				let handBtn = document.querySelector('button[aria-label*="hand" i]');
-				
-				let micOn = micBtn ? micBtn.getAttribute('aria-label').toLowerCase().includes('turn off') : false;
-				let camOn = camBtn ? camBtn.getAttribute('aria-label').toLowerCase().includes('turn off') : false;
-				let handRaised = handBtn ? handBtn.getAttribute('aria-label').toLowerCase().includes('lower') : false;
-
-				return JSON.stringify({
-					in_meeting: true,
-					microphone: micOn,
-					camera: camOn,
-					hand: handRaised
-				});
-			})();
-		`, &stateJSON))
-
-		if err != nil {
-			log.Printf("[/api/meeting/button_state] Error evaluating state: %v\n", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		
-		w.Write([]byte(stateJSON))
-	})
-
-	mux.HandleFunc("/api/meeting/click_button", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		
-		nodeName := stateCtx.GetNodeName()
-		if nodeName != "In Meeting" || stateCtx.TargetCtx == nil {
-			log.Printf("[/api/meeting/click_button] Not in meeting (Node: %s, TargetCtx exists: %v)\n", nodeName, stateCtx.TargetCtx != nil)
-			http.Error(w, "Not in meeting", http.StatusBadRequest)
-			return
-		}
-
-		var payload struct {
-			Button string `json:"button"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			log.Printf("[/api/meeting/click_button] Invalid JSON payload: %v\n", err)
-			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
-			return
-		}
-
-		var query string
-		switch payload.Button {
-		case "microphone":
-			query = `button[aria-label*="microphone" i]`
-		case "camera":
-			query = `button[aria-label*="camera" i]`
-		case "hand":
-			query = `button[aria-label*="hand" i]`
-		case "hangup":
-			log.Printf("[/api/meeting/click_button] Triggering LeaveMeeting node\n")
-			stateCtx.SetNavTarget("LeaveMeeting", nil)
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]bool{"clicked": true})
-			return
-		default:
-			log.Printf("[/api/meeting/click_button] Unknown button requested: %s\n", payload.Button)
-			http.Error(w, "Unknown button", http.StatusBadRequest)
-			return
-		}
-
-		log.Printf("[/api/meeting/click_button] Attempting to click %s using query: %s\n", payload.Button, query)
-
-		var clicked bool
-		err := chromedp.Run(stateCtx.TargetCtx, chromedp.Evaluate(fmt.Sprintf(`
-			(function() {
-				let btn = document.querySelector('%s');
-				if (btn) {
-					btn.click();
-					return true;
-				}
-				return false;
-			})();
-		`, query), &clicked))
-
-		if err != nil {
-			log.Printf("[/api/meeting/click_button] Error executing click script: %v\n", err)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		log.Printf("[/api/meeting/click_button] Click result for %s: %v\n", payload.Button, clicked)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]bool{"clicked": clicked})
+		json.NewEncoder(w).Encode(map[string]bool{"setup_ready": stateCtx.GetSetupReady()})
 	})
 
 	// Run the setup flow

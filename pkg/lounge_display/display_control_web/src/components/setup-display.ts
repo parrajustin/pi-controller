@@ -9,6 +9,15 @@ import { WrapPromise } from 'standard-ts-lib/src/wrap_promise.js';
 import QRCode from 'qrcode';
 import './virtual-keyboard.js';
 import { KeyPressedEvent } from './virtual-keyboard.js';
+import { wsClient } from '../ws-client.js';
+
+const SETUP_STEPS = [
+  { phase: 1, text: 'Init Server' },
+  { phase: 2, text: 'Upload credentials.json' },
+  { phase: 3, text: 'Get auth token' },
+  { phase: 4, text: 'Get Calendar Events' },
+  { phase: 13, text: 'Checking Google Login' }
+];
 
 @customElement('setup-display')
 export class SetupDisplay extends LitElement {
@@ -249,10 +258,15 @@ export class SetupDisplay extends LitElement {
 
   @state() private showChecklist = false;
   
-  @state() private stage = 1;
+  @state() private setupPhase = 0;
+  @state() private phase = '';
+  @state() private currentNode = '';
+  
   @state() private isLoading = true;
-  @state() private statusPageText = 'Checking if there is internet';
+  @state() private statusPageText = 'Initializing...';
   @state() private extraHtml: TemplateResult | undefined = undefined;
+  
+  @state() private lastProcessedNode = '';
   
   @state() private allClear = false;
   @state() private countdown = 15;
@@ -302,191 +316,117 @@ export class SetupDisplay extends LitElement {
     // Trigger the M3 transition to reveal the checklist shortly after load
     setTimeout(() => {
       this.showChecklist = true;
-      this.startPolling();
     }, 1200);
-  }
 
-  private async handleTokenSubmit() {
-    if (!this.shadowRoot) return;
-    const input = this.shadowRoot.querySelector('#token-input') as HTMLInputElement;
-    if (!input || !input.value) return;
-
-    let code = input.value;
-    try {
-      const url = new URL(input.value);
-      const codeParam = url.searchParams.get('code');
-      if (codeParam) {
-        code = codeParam;
-      }
-    } catch (e) {
-      // Not a URL, treat as raw code
-    }
-
-    const res = await WrapPromise(fetch('/api/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code })
-    }), 'Failed to post token');
-
-    if (res.ok && res.safeUnwrap().ok) {
-      input.value = '';
-      this.statusPageText = 'Token submitted, verifying...';
-    } else {
-      alert('Failed to submit token');
-    }
-  }
-
-  // --- State Machine Polling ---
-
-  private async startPolling() {
-    while (!this.allClear) {
-      const stateRes = await WrapPromise(fetch('/api/state'), 'failed fetch');
-      let currentNode = "";
-      if (stateRes.ok && stateRes.safeUnwrap().ok) {
-        const stateData = await WrapPromise(stateRes.safeUnwrap().json(), 'failed json');
-        if (stateData.ok && stateData.safeUnwrap().current_node) {
-          currentNode = stateData.safeUnwrap().current_node;
+    wsClient.onStateUpdate((state) => {
+      if (state.current_node) this.currentNode = state.current_node;
+      if (state.phase) this.phase = state.phase;
+      if (state.setup_phase !== undefined) this.setupPhase = state.setup_phase;
+      
+      this.isLoading = (this.phase === 'work' || this.phase === 'pre-work' || this.phase === 'transitioning' || this.phase === 'pre-setup' || this.phase === 'setup');
+      
+      if (this.setupPhase === 1000) {
+        if (!this.allClear) {
+           this.allClear = true;
+           this.startCountdown();
         }
-      }
-
-      if (!currentNode) {
-        await new Promise(r => setTimeout(r, 3000));
-        continue;
-      }
-
-      const hasWifi = await this.checkStage1();
-      if (!hasWifi) {
-          this.stage = 1;
-          this.isLoading = false;
-          this.statusPageText = 'Please Connect this Pi to the internet';
-          this.extraHtml = html`<pre><code>mvda-lounge-display-wifi-portal</code></pre>`;
-          await new Promise(r => setTimeout(r, 5000));
-          continue;
-      }
-
-      if (currentNode === "Init Server") {
-          await new Promise(r => setTimeout(r, 1000));
-          continue;
-      } else if (currentNode === "Credentials Phase") {
-          this.stage = 2;
-          this.isLoading = false;
-          this.statusPageText = 'Upload Credentials to display';
-          
-          let hostIp = window.location.host;
-          const ipRes = await WrapPromise(fetch('/api/ip'), 'Failed to fetch IP');
-          if (ipRes.ok && ipRes.safeUnwrap().ok) {
-            const ipData = await WrapPromise(ipRes.safeUnwrap().json(), 'Failed to parse IP json');
-            if (ipData.ok && ipData.safeUnwrap().ip) {
-              const port = window.location.port ? `:${window.location.port}` : '';
-              hostIp = `${ipData.safeUnwrap().ip}${port}`;
-            }
-          }
-          
-          const uploadUrl = `http://${hostIp}/upload.html`;
-          
-          const qrRes = await WrapPromise(QRCode.toDataURL(uploadUrl, {
-            margin: 2, width: 180, color: { dark: '#000000', light: '#ffffff' }
-          }), 'failed to generate qr');
-
-          if (qrRes.ok) {
-            this.extraHtml = html`
-              <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; flex-grow: 1; min-height: 0;">
-                <img src="${qrRes.safeUnwrap()}" alt="QR Code to Upload Page" style="border-radius: 8px; max-height: 100%; min-height: 0; object-fit: contain;" />
-                <a href="${uploadUrl}" style="color: #a8c7fa; text-decoration: none; word-break: break-all; text-align: center; font-size: 1rem; flex-shrink: 0;">${uploadUrl}</a>
-              </div>
-            `;
-          } else {
-            this.extraHtml = html`
-              <div style="display: flex; justify-content: center; margin-top: 16px;">
-                <a href="${uploadUrl}" style="color: #a8c7fa; text-decoration: none;">${uploadUrl}</a>
-              </div>
-            `;
-          }
-      } else if (currentNode === "Auth Token Phase") {
-          this.stage = 3;
-          this.isLoading = false;
-          this.statusPageText = 'Authorize the display';
-          
-          const authUrlRes = await WrapPromise(fetch('/api/auth_url'), 'Failed to fetch auth url');
-          if (authUrlRes.ok && authUrlRes.safeUnwrap().ok) {
-            const authUrlData = await WrapPromise(authUrlRes.safeUnwrap().json(), 'Failed to parse auth url json');
-            if (authUrlData.ok && authUrlData.safeUnwrap().url) {
-              const url = authUrlData.safeUnwrap().url;
-              if (url) {
-                if (!this.extraHtml) {
-                  const qrRes = await WrapPromise(QRCode.toDataURL(url, {
-                    margin: 2, width: 180, color: { dark: '#000000', light: '#ffffff' }
-                  }), 'failed to generate qr');
-        
-                  if (qrRes.ok) {
-                    this.extraHtml = html`
-                      <div style="display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 8px; margin-top: 8px; flex-grow: 1; min-height: 0; overflow-y: auto;">
-                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
-                          <img src="${qrRes.safeUnwrap()}" alt="QR Code for Auth URL" style="border-radius: 8px; max-height: 150px; min-height: 0; object-fit: contain;" />
-                          <a href="${url}" target="_blank" style="color: #a8c7fa; text-decoration: none; word-break: break-all; text-align: center; font-size: 0.9rem; flex-shrink: 0;">Open Auth URL</a>
-                        </div>
-                        <div style="font-size: 0.85rem; color: var(--text-secondary, #9aa0a6); margin-top: 4px; text-wrap: wrap;">
-                          Google may redirect to a broken 'localhost' page. Copy that full URL and paste it below:
-                        </div>
-                        <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-                          <md-outlined-text-field id="token-input" label="Paste URL or Code" style="flex-grow: 1;" @focus=${(e: Event) => this.openKeyboard('token', e.target)}></md-outlined-text-field>
-                          <md-filled-button @click=${this.handleTokenSubmit}>Submit</md-filled-button>
-                        </div>
-                      </div>
-                    `;
-                  }
-                }
-              } else {
-                this.isLoading = true;
-                this.statusPageText = 'Generating Auth URL...';
-                this.extraHtml = undefined;
-              }
-            }
-          }
-      } else if (currentNode === "Calendar Logic Phase") {
-          this.stage = 4;
-          this.isLoading = true;
-          this.statusPageText = 'Checking if we can fetch calendar events';
-          this.extraHtml = undefined;
-      } else if (currentNode === "Password Input Page") {
-          this.stage = 5;
-          this.isLoading = false;
-          this.statusPageText = 'Google requires your password';
-          this.extraHtml = html`
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-               <div style="font-size: 0.9rem;">Please enter your Google account password to proceed.</div>
-               <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
-                 <md-outlined-text-field id="google-password-input" label="Google Password" type="password" style="flex-grow: 1;" @focus=${(e: Event) => this.openKeyboard('password', e.target)}></md-outlined-text-field>
-                 <md-filled-button @click=${this.handlePasswordSubmit}>Submit</md-filled-button>
-               </div>
-            </div>
-          `;
-      } else if (currentNode === "Finalize Setup") {
-          this.stage = 6;
-          this.isLoading = true;
-          this.statusPageText = 'Finalization';
-          this.extraHtml = undefined;
-          
-          const res = await WrapPromise(fetch('/auth/finalize'), 'failed fetch');
-          if (res.ok && res.safeUnwrap().ok) {
-            const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
-            if (dataRes.ok && dataRes.safeUnwrap().success) {
-               this.stage = 7;
-               this.isLoading = false;
-               this.statusPageText = 'Setup was successfull refreshing in 15';
-               this.allClear = true;
-               this.startCountdown();
-               return; 
-            }
-          }
-      } else {
-          this.stage = 5;
-          this.isLoading = true;
-          this.statusPageText = 'Logging in to meet.google.com (' + currentNode + ')';
-          this.extraHtml = undefined;
+        return;
       }
       
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      this.processStateUpdate();
+    });
+  }
+
+  private async processStateUpdate() {
+    if (this.currentNode === "Credentials Phase") {
+      this.statusPageText = 'Upload Credentials to display';
+      if (this.lastProcessedNode !== this.currentNode) {
+        this.lastProcessedNode = this.currentNode;
+        
+        let hostIp = window.location.host;
+        const ipRes = await WrapPromise(wsClient.request({ type: 'get_ip' }), 'Failed to fetch IP');
+        if (ipRes.ok) {
+          const ipData = ipRes.safeUnwrap();
+          if (ipData && ipData.ip) {
+            const port = window.location.port ? `:${window.location.port}` : '';
+            hostIp = `${ipData.ip}${port}`;
+          }
+        }
+        
+        const uploadUrl = `http://${hostIp}/upload.html`;
+        const qrRes = await WrapPromise(QRCode.toDataURL(uploadUrl, {
+          margin: 2, width: 180, color: { dark: '#000000', light: '#ffffff' }
+        }), 'failed to generate qr');
+
+        if (qrRes.ok) {
+          this.extraHtml = html`
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; margin-top: 8px; flex-grow: 1; min-height: 0;">
+              <img src="${qrRes.safeUnwrap()}" alt="QR Code to Upload Page" style="border-radius: 8px; max-height: 100%; min-height: 0; object-fit: contain;" />
+              <a href="${uploadUrl}" style="color: #a8c7fa; text-decoration: none; word-break: break-all; text-align: center; font-size: 1rem; flex-shrink: 0;">${uploadUrl}</a>
+            </div>
+          `;
+        }
+      }
+    } else if (this.currentNode === "Auth Token Phase") {
+      this.statusPageText = 'Authorize the display';
+      if (this.lastProcessedNode !== this.currentNode) {
+        this.lastProcessedNode = this.currentNode;
+        
+        const authUrlRes = await WrapPromise(wsClient.request({ type: 'get_auth_url' }), 'Failed to fetch auth url');
+        if (authUrlRes.ok) {
+          const authUrlData = authUrlRes.safeUnwrap();
+          if (authUrlData && authUrlData.url) {
+            const url = authUrlData.url;
+            const qrRes = await WrapPromise(QRCode.toDataURL(url, {
+              margin: 2, width: 180, color: { dark: '#000000', light: '#ffffff' }
+            }), 'failed to generate qr');
+            
+            if (qrRes.ok) {
+              this.extraHtml = html`
+                <div style="display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 8px; margin-top: 8px; flex-grow: 1; min-height: 0; overflow-y: auto;">
+                  <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;">
+                    <img src="${qrRes.safeUnwrap()}" alt="QR Code for Auth URL" style="border-radius: 8px; max-height: 150px; min-height: 0; object-fit: contain;" />
+                    <a href="${url}" target="_blank" style="color: #a8c7fa; text-decoration: none; word-break: break-all; text-align: center; font-size: 0.9rem; flex-shrink: 0;">Open Auth URL</a>
+                  </div>
+                  <div style="font-size: 0.85rem; color: var(--text-secondary, #9aa0a6); margin-top: 4px; text-wrap: wrap;">
+                    Google may redirect to a broken 'localhost' page. Copy that full URL and paste it below:
+                  </div>
+                  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                    <md-outlined-text-field id="token-input" label="Paste URL or Code" style="flex-grow: 1;" @focus=${(e: Event) => this.openKeyboard('token', e.target)}></md-outlined-text-field>
+                    <md-filled-button @click=${this.handleTokenSubmit}>Submit</md-filled-button>
+                  </div>
+                </div>
+              `;
+            }
+          }
+        }
+      }
+    } else if (this.currentNode === "Password Input Page") {
+      this.statusPageText = 'Google requires your password';
+      this.extraHtml = html`
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+           <div style="font-size: 0.9rem;">Please enter your Google account password to proceed.</div>
+           <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+             <md-outlined-text-field id="google-password-input" label="Google Password" type="password" style="flex-grow: 1;" @focus=${(e: Event) => this.openKeyboard('password', e.target)}></md-outlined-text-field>
+             <md-filled-button @click=${this.handlePasswordSubmit}>Submit</md-filled-button>
+           </div>
+        </div>
+      `;
+      this.lastProcessedNode = this.currentNode;
+    } else if (this.currentNode === "Init Server") {
+      this.statusPageText = 'Server Initializing...';
+      const hasWifi = await this.checkStage1();
+      if (!hasWifi) {
+          this.statusPageText = 'Please Connect this Pi to the internet';
+          this.extraHtml = html`<pre><code>mvda-lounge-display-wifi-portal</code></pre>`;
+      } else {
+          this.extraHtml = undefined;
+      }
+      this.lastProcessedNode = this.currentNode;
+    } else {
+      this.statusPageText = `Currently in ${this.currentNode || 'Setup'} (${this.phase || 'Waiting'})`;
+      this.extraHtml = undefined;
+      this.lastProcessedNode = this.currentNode;
     }
   }
 
@@ -496,13 +436,9 @@ export class SetupDisplay extends LitElement {
     if (!input || !input.value) return;
 
     const password = input.value;
-    const res = await WrapPromise(fetch('/api/password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password })
-    }), 'Failed to post password');
+    const res = await WrapPromise(wsClient.request({ type: 'submit_password', payload: { password } }), 'Failed to post password');
 
-    if (res.ok && res.safeUnwrap().ok) {
+    if (res.ok && res.safeUnwrap().status === 'ok') {
       input.value = '';
       this.statusPageText = 'Password submitted, processing...';
     } else {
@@ -511,11 +447,11 @@ export class SetupDisplay extends LitElement {
   }
 
   private async checkStage1(): Promise<boolean> {
-    const res = await WrapPromise(fetch('/api/has_wifi'), 'failed fetch');
-    if (!res.ok || !res.safeUnwrap().ok) return false;
+    const res = await WrapPromise(wsClient.request({ type: 'has_wifi' }), 'failed fetch');
+    if (!res.ok) return false;
     
-    const dataRes = await WrapPromise(res.safeUnwrap().json(), 'failed json');
-    if (!dataRes.ok || !dataRes.safeUnwrap().internetAccess) return false;
+    const data = res.safeUnwrap();
+    if (!data || !data.internetAccess) return false;
     
     return true;
   }
@@ -560,69 +496,29 @@ export class SetupDisplay extends LitElement {
         <div class="checklist-section ${this.showChecklist ? 'show' : ''}">
           <div class="checklist-title">Setup Progress</div>
           
-          <div class="stage-container ${this.stage > 1 ? 'completed-hide' : ''}">
-            <label class="check-item">
-              <md-checkbox ?checked=${this.stage > 1} disabled></md-checkbox>
-              <span>Connect to Wifi</span>
-            </label>
-            <div class="extra-html-container ${this.stage === 1 && this.extraHtml ? 'open' : ''}">
-              ${this.stage === 1 ? this.extraHtml : ''}
-            </div>
-          </div>
-          
-          <div class="stage-container ${this.stage > 2 ? 'completed-hide' : ''}">
-            <label class="check-item">
-              <md-checkbox ?checked=${this.stage > 2} disabled></md-checkbox>
-              <span>Upload credentials.json</span>
-            </label>
-            <div class="extra-html-container ${this.stage === 2 && this.extraHtml ? 'open' : ''}">
-              ${this.stage === 2 ? this.extraHtml : ''}
-            </div>
-          </div>
-          
-          <div class="stage-container ${this.stage > 3 ? 'completed-hide' : ''}">
-            <label class="check-item">
-              <md-checkbox ?checked=${this.stage > 3} disabled></md-checkbox>
-              <span>Get auth token</span>
-            </label>
-            <div class="extra-html-container ${this.stage === 3 && this.extraHtml ? 'open' : ''}">
-              ${this.stage === 3 ? this.extraHtml : ''}
-            </div>
-          </div>
-          
-          <div class="stage-container ${this.stage > 4 ? 'completed-hide' : ''}">
-            <label class="check-item">
-              <md-checkbox ?checked=${this.stage > 4} disabled></md-checkbox>
-              <span>Got Calendar Events</span>
-            </label>
-            <div class="extra-html-container ${this.stage === 4 && this.extraHtml ? 'open' : ''}">
-              ${this.stage === 4 ? this.extraHtml : ''}
-            </div>
-          </div>
+          ${SETUP_STEPS.map(step => {
+            const isCompleted = this.setupPhase > step.phase;
+            // For step 13 (Google Login), it's active if setupPhase is between 5 and 13
+            const isActive = step.phase === 13 
+              ? (this.setupPhase >= 5 && this.setupPhase <= 13)
+              : this.setupPhase === step.phase;
+            
+            return html`
+              <div class="stage-container ${isCompleted ? 'completed-hide' : ''}">
+                <label class="check-item">
+                  <md-checkbox ?checked=${isCompleted} disabled></md-checkbox>
+                  <span>${step.text}</span>
+                </label>
+                <div class="extra-html-container ${isActive && this.extraHtml ? 'open' : ''}">
+                  ${isActive ? this.extraHtml : ''}
+                </div>
+              </div>
+            `;
+          })}
 
-          <div class="stage-container ${this.stage > 5 ? 'completed-hide' : ''}">
-            <label class="check-item">
-              <md-checkbox ?checked=${this.stage > 5} disabled></md-checkbox>
-              <span>Google Login</span>
-            </label>
-            <div class="extra-html-container ${this.stage === 5 && this.extraHtml ? 'open' : ''}">
-              ${this.stage === 5 ? this.extraHtml : ''}
-            </div>
-          </div>
-
-          <div class="stage-container ${this.stage > 6 ? 'completed-hide' : ''}">
-            <label class="check-item">
-              <md-checkbox ?checked=${this.stage > 6} disabled></md-checkbox>
-              <span>Finalized</span>
-            </label>
-            <div class="extra-html-container ${this.stage === 6 && this.extraHtml ? 'open' : ''}">
-              ${this.stage === 6 ? this.extraHtml : ''}
-            </div>
-          </div>
-
-          ${this.stage === 7 ? html`
+          ${this.setupPhase === 1000 ? html`
             <div class="check-item" style="justify-content: center; font-size: 1.3rem; margin-top: 20px; text-align: center; text-wrap: wrap;">
-              ${this.statusPageText}
+              Setup was successful! Redirecting...
             </div>
           ` : ''}
         </div>

@@ -1,7 +1,10 @@
 package setup
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"time"
 )
 
 var (
@@ -35,16 +38,58 @@ func InitNodes() *Node {
 	EmailInputNode.Next = []*Node{PasswordInputNode}
 	PasswordInputNode.Next = []*Node{TwoFactorNode, WrongPasswordNode, StartMeetNode}
 	WrongPasswordNode.Next = []*Node{PasswordInputNode}
-	TwoFactorNode.Next = []*Node{FinishedMeetNode, CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode}
+	TwoFactorNode.Next = []*Node{MeetLandingPageNode, CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode}
 
 	// 2. Display Nodes (from display_nodes.go)
 	InitCDPNode.Next = []*Node{StartMeetNode}
-	StartMeetNode.Next = []*Node{WorkspaceRedirectedNode, FinishedMeetNode, CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode, NavigateToMeeting}
-	FinishedMeetNode.Next = []*Node{CheckInvalidMeetingNode, NavigateToMeeting, JoinMeetingNode, InMeetingNode}
-	JoinMeetingNode.Next = []*Node{CheckInvalidMeetingNode, InMeetingNode, FinishedMeetNode}
-	InMeetingNode.Next = []*Node{CheckInvalidMeetingNode, FinishedMeetNode, NavigateToMeeting, LeaveMeetingNode}
+	StartMeetNode.Next = []*Node{WorkspaceRedirectedNode, MeetLandingPageNode, CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode, NavigateToMeeting}
+	MeetLandingPageNode.Next = []*Node{CheckInvalidMeetingNode, NavigateToMeeting, JoinMeetingNode, InMeetingNode}
+	JoinMeetingNode.Next = []*Node{CheckInvalidMeetingNode, InMeetingNode, MeetLandingPageNode}
+	InMeetingNode.Next = []*Node{CheckInvalidMeetingNode, MeetLandingPageNode, NavigateToMeeting, LeaveMeetingNode}
 	LeaveMeetingNode.Next = []*Node{StartMeetNode}
-	NavigateToMeeting.Next = []*Node{CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode, FinishedMeetNode}
+	NavigateToMeeting.Next = []*Node{CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode, MeetLandingPageNode, NavigateToMeeting}
+
+	// 3. Add has_wifi WS handler to all initial setup nodes
+	setupNodes := []*Node{
+		InitServerNode, CredentialsNode, AuthTokenNode, CalendarNode,
+		WorkspaceRedirectedNode, AccountsGooglePageNode, ChooseAccountNode,
+		AccountOptionExistsNode, AccountOptionMissingNode, EmailInputNode,
+		PasswordInputNode, WrongPasswordNode, TwoFactorNode,
+	}
+
+	for i, n := range setupNodes {
+		origSetup := n.Setup
+		phaseIdx := i + 1
+		n.Setup = func(s *StateContext) error {
+			s.SetSetupPhase(phaseIdx)
+			s.AddWSHandler("has_wifi", func(payload json.RawMessage) (interface{}, error) {
+				client := http.Client{Timeout: 3 * time.Second}
+				_, err := client.Get("https://google.com")
+				return map[string]bool{"internetAccess": err == nil}, nil
+			})
+			if origSetup != nil {
+				return origSetup(s)
+			}
+			return nil
+		}
+		origTeardown := n.Teardown
+		n.Teardown = func(s *StateContext) error {
+			s.RemoveWSHandler("has_wifi")
+			if origTeardown != nil {
+				return origTeardown(s)
+			}
+			return nil
+		}
+	}
+
+	origInitCDPSetup := InitCDPNode.Setup
+	InitCDPNode.Setup = func(s *StateContext) error {
+		s.SetSetupPhase(1000)
+		if origInitCDPSetup != nil {
+			return origInitCDPSetup(s)
+		}
+		return nil
+	}
 
 	return InitServerNode
 }

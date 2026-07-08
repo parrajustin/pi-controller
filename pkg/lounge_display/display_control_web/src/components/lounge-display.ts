@@ -5,6 +5,7 @@ import './meeting-list.js';
 import './bottom-bar.js';
 import splashImg from '../../splash.png';
 import { parse, isWithinInterval, format, addSeconds, parseISO } from 'date-fns';
+import { wsClient } from '../ws-client.js';
 
 interface EventInfo {
   name: string;
@@ -191,9 +192,8 @@ export class LoungeDisplay extends LitElement {
 
   private async fetchCalendarEvents() {
     try {
-      const response = await fetch('/api/calendar_events');
-      if (!response.ok) throw new Error('Network error');
-      const events: EventInfo[] = await response.json();
+      const response = await wsClient.request({ type: 'calendar_events' });
+      const events: EventInfo[] = response || [];
 
       if (!events) {
         this.meetings = [];
@@ -241,43 +241,35 @@ export class LoungeDisplay extends LitElement {
     this.timer = setInterval(() => {
       this.currentTime = new Date();
       this.updateMeetings();
-      this.fetchServerState();
+      this.pollMeetingState();
     }, 1000);
+
+    wsClient.onStateUpdate((state) => {
+      this.serverState = state;
+    });
   }
 
-  private async fetchServerState() {
-    try {
-      const response = await fetch('/api/state');
-      if (response.ok) {
-        this.serverState = await response.json();
+  private async pollMeetingState() {
+    if (this.serverState.current_node === 'In Meeting') {
+      try {
+        const meetResponse = await wsClient.request({ type: 'button_state' });
+        this.meetingState = meetResponse;
+      } catch (e) {
+        console.error('Failed to fetch button state', e);
       }
-
-      if (this.serverState.current_node === 'In Meeting') {
-        const meetResponse = await fetch('/api/meeting/button_state');
-        if (meetResponse.ok) {
-          this.meetingState = await meetResponse.json();
-        }
-      }
-    } catch (e) {
-      console.error('Failed to fetch server state', e);
     }
   }
 
   private async clickMeetingButton(button: string) {
     try {
-      await fetch('/api/meeting/click_button', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ button })
-      });
-      // Immediately refresh state
-      await this.fetchServerState();
+      await wsClient.request({ type: 'click_button', payload: { button } });
+      // Wait a bit to let the server update its state internally, or update manually
     } catch (e) {
       console.error('Failed to click button', e);
     }
     
     // Clear optimistic loading if we actually reached the meeting!
-    if (data.current_node === 'In Meeting') {
+    if (this.serverState.current_node === 'In Meeting') {
       this.clearOptimisticLoading();
     }
   }
@@ -301,11 +293,7 @@ export class LoungeDisplay extends LitElement {
     }, 30000);
 
     try {
-      await fetch('/api/join_meeting', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
-      });
+      await wsClient.request({ type: 'join_meeting', payload: { code } });
     } catch (err) {
       console.error('Failed to join meeting:', err);
     }

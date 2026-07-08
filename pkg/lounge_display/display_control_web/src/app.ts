@@ -2,7 +2,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import './components/setup-display.js';
 import './components/display-controller.js';
-import { WrapPromise } from 'standard-ts-lib/src/wrap_promise.js';
+import { wsClient } from './ws-client.js';
 
 @customElement('display-control-app')
 export class DisplayControlApp extends LitElement {
@@ -11,26 +11,19 @@ export class DisplayControlApp extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
-    this.pollStatus();
-  }
-
-  private async pollStatus() {
-    while (true) {
-      const res = await WrapPromise(fetch('/api/status'), 'failed fetch');
-      if (res.ok && res.safeUnwrap().ok) {
-        const data = await WrapPromise(res.safeUnwrap().json(), 'failed json');
-        if (data.ok && data.safeUnwrap().status === 'ready') {
-          if (!this.setupCompleted) {
-            this.setupCompleted = true;
-          }
-          await new Promise(r => setTimeout(r, 5000));
-          continue;
-        } else {
-          this.setupCompleted = false;
-        }
+    try {
+      const res = await fetch('/api/setup_done');
+      if (res.ok) {
+        const data = await res.json();
+        this.setupCompleted = data.setup_ready === true;
       }
-      await new Promise(r => setTimeout(r, 2000));
+    } catch (e) {
+      console.error('Failed to fetch setup status', e);
     }
+
+    wsClient.onStateUpdate((state) => {
+      this.setupCompleted = state.setup_ready === true;
+    });
   }
 
   static styles = css`

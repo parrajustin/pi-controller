@@ -149,45 +149,21 @@ func init() {
 		Name:       "Auth Token Phase",
 		IsRestNode: true,
 		Setup: func(s *StateContext) error {
-			RegisterRoute(s, "/api/has_auth", func(w http.ResponseWriter, r *http.Request) {
-				tokPath := filepath.Join(s.OauthDir, "token.json.enc")
-				hasAuth := false
-				if s.EncKey != "" {
-					if ciphertext, err := os.ReadFile(tokPath); err == nil {
-						if plaintext, err := cryptoutil.Decrypt(ciphertext, s.EncKey); err == nil {
-							tok := &oauth2.Token{}
-							if err := json.Unmarshal(plaintext, tok); err == nil && tok.AccessToken != "" {
-								hasAuth = true
-							}
-						}
-					}
+			s.AddWSHandler("get_auth_url", func(payload json.RawMessage) (interface{}, error) {
+				return map[string]string{"url": authURLStr}, nil
+			})
+			s.AddWSHandler("submit_token", func(payload json.RawMessage) (interface{}, error) {
+				var p tokenPayload
+				if err := json.Unmarshal(payload, &p); err == nil && p.Code != "" {
+					go func() { authCodeChan <- p.Code }()
 				}
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]bool{"hasAuth": hasAuth})
+				return map[string]string{"status": "ok"}, nil
 			})
-			RegisterRoute(s, "/auth/has_token", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]bool{"hasToken": hasToken})
-			})
-			RegisterRoute(s, "/api/auth_url", func(w http.ResponseWriter, r *http.Request) {
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(map[string]string{"url": authURLStr})
-			})
-			RegisterRoute(s, "/api/token", func(w http.ResponseWriter, r *http.Request) {
-				code := ""
-				if r.Method == http.MethodGet {
-					code = r.URL.Query().Get("code")
-				} else if r.Method == http.MethodPost {
-					var payload tokenPayload
-					json.NewDecoder(r.Body).Decode(&payload)
-					code = payload.Code
-				}
-				if code != "" {
-					authCodeChan <- code
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(`{"status": "ok"}`))
-			})
+			return nil
+		},
+		Teardown: func(s *StateContext) error {
+			s.RemoveWSHandler("get_auth_url")
+			s.RemoveWSHandler("submit_token")
 			return nil
 		},
 		PreCheck: func(s *StateContext) bool { return true },
@@ -423,21 +399,19 @@ func init() {
 		Name:       "Password Input Page",
 		IsRestNode: true,
 		Setup: func(s *StateContext) error {
-			RegisterRoute(s, "/api/password", func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodPost {
-					return
-				}
-				body, _ := io.ReadAll(r.Body)
-				var payload struct {
+			s.AddWSHandler("submit_password", func(payload json.RawMessage) (interface{}, error) {
+				var p struct {
 					Password string `json:"password"`
 				}
-				json.Unmarshal(body, &payload)
-				if payload.Password != "" {
-					s.PasswordChan <- payload.Password
+				if err := json.Unmarshal(payload, &p); err == nil && p.Password != "" {
+					go func() { s.PasswordChan <- p.Password }()
 				}
-				w.Header().Set("Content-Type", "application/json")
-				w.Write([]byte(`{"status": "ok"}`))
+				return map[string]string{"status": "ok"}, nil
 			})
+			return nil
+		},
+		Teardown: func(s *StateContext) error {
+			s.RemoveWSHandler("submit_password")
 			return nil
 		},
 		PreCheck: func(s *StateContext) bool {

@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,12 +12,15 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/gorilla/websocket"
 	"google.golang.org/api/calendar/v3"
 )
 
 type StateContext struct {
 	mu          sync.Mutex
 	CurrentNode string
+	Phase       string
+	SetupPhase  int
 
 	Ctx       context.Context
 	TargetCtx context.Context
@@ -43,18 +47,123 @@ type StateContext struct {
 	PasswordChan     chan string
 	ReceiverFlag     string
 	SetupReady       bool
+
+	WSConns    map[*websocket.Conn]bool
+	WSHandlers map[string]func(payload json.RawMessage) (interface{}, error)
+}
+
+func (s *StateContext) AddWSHandler(msgType string, handler func(payload json.RawMessage) (interface{}, error)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.WSHandlers == nil {
+		s.WSHandlers = make(map[string]func(payload json.RawMessage) (interface{}, error))
+	}
+	s.WSHandlers[msgType] = handler
+}
+
+func (s *StateContext) RemoveWSHandler(msgType string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.WSHandlers != nil {
+		delete(s.WSHandlers, msgType)
+	}
+}
+
+func (s *StateContext) GetWSHandler(msgType string) (func(payload json.RawMessage) (interface{}, error), bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.WSHandlers == nil {
+		return nil, false
+	}
+	handler, ok := s.WSHandlers[msgType]
+	return handler, ok
+}
+
+func (s *StateContext) AddWSConn(conn *websocket.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.WSConns == nil {
+		s.WSConns = make(map[*websocket.Conn]bool)
+	}
+	s.WSConns[conn] = true
+}
+
+func (s *StateContext) RemoveWSConn(conn *websocket.Conn) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.WSConns != nil {
+		delete(s.WSConns, conn)
+	}
+}
+
+func (s *StateContext) BroadcastState() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
+	if s.WSConns == nil || len(s.WSConns) == 0 {
+		return
+	}
+	
+	state := map[string]interface{}{
+		"current_node": s.CurrentNode,
+		"meeting_code": s.MeetingCode,
+		"setup_ready":  s.SetupReady,
+		"phase":        s.Phase,
+		"setup_phase":  s.SetupPhase,
+	}
+	msg := map[string]interface{}{
+		"type":    "state_update",
+		"payload": state,
+	}
+	
+	for conn := range s.WSConns {
+		err := conn.WriteJSON(msg)
+		if err != nil {
+			log.Printf("Error broadcasting to WS: %v", err)
+			conn.Close()
+			delete(s.WSConns, conn)
+		}
+	}
 }
 
 func (s *StateContext) SetNodeName(name string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.CurrentNode = name
+	s.mu.Unlock()
+	s.BroadcastState()
 }
 func (s *StateContext) GetNodeName() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.CurrentNode
 }
+
+func (s *StateContext) SetPhase(phase string) {
+	s.mu.Lock()
+	s.Phase = phase
+	s.mu.Unlock()
+	s.BroadcastState()
+}
+
+func (s *StateContext) SetSetupPhase(phase int) {
+	s.mu.Lock()
+	s.SetupPhase = phase
+	s.mu.Unlock()
+	s.BroadcastState()
+}
+
+func (s *StateContext) GetPhase() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Phase
+}
+
+func (s *StateContext) GetSetupPhase() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.SetupPhase
+}
+
 
 func (s *StateContext) SetNavTarget(target string, opts map[string]interface{}) {
 	s.mu.Lock()
@@ -83,8 +192,9 @@ func (s *StateContext) GetSetupReady() bool {
 
 func (s *StateContext) SetSetupReady(ready bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.SetupReady = ready
+	s.mu.Unlock()
+	s.BroadcastState()
 }
 
 type Node struct {
@@ -146,7 +256,7 @@ func RunEngine(startNode *Node, s *StateContext) {
 		s.SetNodeName(currentNode.Name)
 
 		// If we reach a state where the display is ready to show meeting controls, set SetupReady to true
-		if currentNode.Name == "Finished Meet" ||
+		if currentNode.Name == "Meet Landing Page" ||
 			currentNode.Name == "In Meeting" ||
 			currentNode.Name == "NavigateToMeeting" ||
 			currentNode.Name == "Join Meeting Page" ||
@@ -154,7 +264,9 @@ func RunEngine(startNode *Node, s *StateContext) {
 			s.SetSetupReady(true)
 		}
 
+		s.SetPhase("pre-setup")
 		if currentNode.Setup != nil {
+			s.SetPhase("setup")
 			err := currentNode.Setup(s)
 			if err != nil {
 				log.Printf("Setup failed for node %s: %v\n", currentNode.Name, err)
@@ -165,7 +277,9 @@ func RunEngine(startNode *Node, s *StateContext) {
 			captureDebugArtifacts(s, strings.ReplaceAll(strings.ToLower(currentNode.Name), " ", "_"), "pre", "display_")
 		}
 
+		s.SetPhase("pre-work")
 		if currentNode.Work != nil {
+			s.SetPhase("work")
 			err := currentNode.Work(s)
 			if err != nil {
 				log.Printf("Work failed for node %s: %v\n", currentNode.Name, err)
@@ -180,6 +294,7 @@ func RunEngine(startNode *Node, s *StateContext) {
 			captureDebugArtifacts(s, strings.ReplaceAll(strings.ToLower(currentNode.Name), " ", "_"), "post", "display_")
 		}
 
+		s.SetPhase("done-check")
 		if currentNode.DoneCheck != nil {
 			err := currentNode.DoneCheck(s)
 			if err != nil {
@@ -189,6 +304,7 @@ func RunEngine(startNode *Node, s *StateContext) {
 			}
 		}
 
+		s.SetPhase("transitioning")
 		if len(currentNode.Next) == 0 {
 			fmt.Println("\nFlow finished successfully at terminal node:", currentNode.Name)
 			return

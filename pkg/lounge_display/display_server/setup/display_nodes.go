@@ -2,6 +2,7 @@ package setup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -15,11 +16,11 @@ import (
 )
 
 var (
-	InitCDPNode       *Node
-	StartMeetNode     *Node
-	FinishedMeetNode  *Node
-	NavigateToMeeting *Node
-	JoinMeetingNode   *Node
+	InitCDPNode             *Node
+	StartMeetNode           *Node
+	MeetLandingPageNode     *Node
+	NavigateToMeeting       *Node
+	JoinMeetingNode         *Node
 	InMeetingNode           *Node
 	LeaveMeetingNode        *Node
 	CheckInvalidMeetingNode *Node
@@ -93,8 +94,8 @@ func init() {
 		},
 	}
 
-	FinishedMeetNode = &Node{
-		Name: "Finished Meet",
+	MeetLandingPageNode = &Node{
+		Name: "Meet Landing Page",
 		IsRestNode: true,
 		PreCheck: func(s *StateContext) bool {
 			s.mu.Lock()
@@ -112,10 +113,29 @@ func init() {
 			u, err := url.Parse(urlStr)
 			return err == nil && u.Host == "meet.google.com" && (u.Path == "/" || u.Path == "/new" || u.Path == "")
 		},
+		Setup: func(s *StateContext) error {
+			s.AddWSHandler("join_meeting", func(payload json.RawMessage) (interface{}, error) {
+				var p struct {
+					Code string `json:"code"`
+				}
+				if err := json.Unmarshal(payload, &p); err != nil {
+					return nil, fmt.Errorf("invalid payload")
+				} else if p.Code == "" {
+					return nil, fmt.Errorf("meeting code is required")
+				}
+				s.SetNavTarget("NavigateToMeeting", map[string]interface{}{"code": p.Code})
+				return map[string]string{"status": "ok"}, nil
+			})
+			return nil
+		},
 		Work: func(s *StateContext) error {
 			var urlStr string
 			_ = chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
-			log.Printf("Entered Finished Meet. Current URL: %s\n", urlStr)
+			log.Printf("Entered Meet Landing Page. Current URL: %s\n", urlStr)
+			return nil
+		},
+		Teardown: func(s *StateContext) error {
+			s.RemoveWSHandler("join_meeting")
 			return nil
 		},
 	}
@@ -173,6 +193,75 @@ func init() {
 			
 			return !hasJoinBtn
 		},
+		Setup: func(s *StateContext) error {
+			s.AddWSHandler("button_state", func(payload json.RawMessage) (interface{}, error) {
+				var stateJSON string
+				err := chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+					(function() {
+						let micBtn = document.querySelector('button[aria-label*="microphone" i]');
+						let camBtn = document.querySelector('button[aria-label*="camera" i]');
+						let handBtn = document.querySelector('button[aria-label*="hand" i]');
+						
+						let micOn = micBtn ? micBtn.getAttribute('aria-label').toLowerCase().includes('turn off') : false;
+						let camOn = camBtn ? camBtn.getAttribute('aria-label').toLowerCase().includes('turn off') : false;
+						let handRaised = handBtn ? handBtn.getAttribute('aria-label').toLowerCase().includes('lower') : false;
+
+						return JSON.stringify({
+							in_meeting: true,
+							microphone: micOn,
+							camera: camOn,
+							hand: handRaised
+						});
+					})();
+				`, &stateJSON))
+				if err != nil {
+					return nil, err
+				}
+				var parsed map[string]interface{}
+				json.Unmarshal([]byte(stateJSON), &parsed)
+				return parsed, nil
+			})
+
+			s.AddWSHandler("click_button", func(payload json.RawMessage) (interface{}, error) {
+				var p struct {
+					Button string `json:"button"`
+				}
+				if err := json.Unmarshal(payload, &p); err != nil {
+					return nil, fmt.Errorf("invalid payload")
+				}
+				var query string
+				switch p.Button {
+				case "microphone":
+					query = `button[aria-label*="microphone" i]`
+				case "camera":
+					query = `button[aria-label*="camera" i]`
+				case "hand":
+					query = `button[aria-label*="hand" i]`
+				case "hangup":
+					s.SetNavTarget("LeaveMeeting", nil)
+					return map[string]bool{"clicked": true}, nil
+				default:
+					return nil, fmt.Errorf("unknown button")
+				}
+
+				var clicked bool
+				err := chromedp.Run(s.TargetCtx, chromedp.Evaluate(fmt.Sprintf(`
+					(function() {
+						let btn = document.querySelector('%s');
+						if (btn) {
+							btn.click();
+							return true;
+						}
+						return false;
+					})();
+				`, query), &clicked))
+				if err != nil {
+					return nil, err
+				}
+				return map[string]bool{"clicked": clicked}, nil
+			})
+			return nil
+		},
 		Work: func(s *StateContext) error {
 			var urlStr string
 			_ = chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
@@ -183,6 +272,11 @@ func init() {
 				s.MeetingCode = strings.TrimPrefix(u.Path, "/")
 				s.mu.Unlock()
 			}
+			return nil
+		},
+		Teardown: func(s *StateContext) error {
+			s.RemoveWSHandler("button_state")
+			s.RemoveWSHandler("click_button")
 			return nil
 		},
 	}
