@@ -42,7 +42,7 @@ func InitNodes() *Node {
 
 	// 2. Display Nodes (from display_nodes.go)
 	InitCDPNode.Next = []*Node{StartMeetNode}
-	StartMeetNode.Next = []*Node{WorkspaceRedirectedNode, MeetLandingPageNode, CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode, NavigateToMeeting}
+	StartMeetNode.Next = []*Node{WorkspaceRedirectedNode, AccountsGooglePageNode, MeetLandingPageNode, CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode, NavigateToMeeting}
 	MeetLandingPageNode.Next = []*Node{CheckInvalidMeetingNode, NavigateToMeeting, JoinMeetingNode, InMeetingNode}
 	JoinMeetingNode.Next = []*Node{CheckInvalidMeetingNode, InMeetingNode, MeetLandingPageNode}
 	InMeetingNode.Next = []*Node{CheckInvalidMeetingNode, MeetLandingPageNode, NavigateToMeeting, LeaveMeetingNode}

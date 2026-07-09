@@ -141,6 +141,14 @@ func init() {
 			var urlStr string
 			_ = chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
 			log.Printf("Entered Meet Landing Page. Current URL: %s\n", urlStr)
+			
+			s.mu.Lock()
+			s.MeetingCode = ""
+			s.NavTarget = ""
+			s.NavOpts = nil
+			s.mu.Unlock()
+			s.BroadcastState()
+			
 			return nil
 		},
 		Teardown: func(s *StateContext) error {
@@ -323,20 +331,6 @@ func init() {
 			)
 			if err != nil {
 				return fmt.Errorf("failed to navigate: %w", err)
-			}
-
-			var buf []byte
-			var html string
-			err = chromedp.Run(s.TargetCtx,
-				chromedp.FullScreenshot(&buf, 100),
-				chromedp.OuterHTML("html", &html),
-			)
-			if err == nil {
-				os.WriteFile("meeting_dump.png", buf, 0644)
-				os.WriteFile("meeting_dump.html", []byte(html), 0644)
-				fmt.Println("Saved meeting_dump.png and meeting_dump.html")
-			} else {
-				fmt.Printf("Failed to capture meeting dumps: %v\n", err)
 			}
 
 			return nil
