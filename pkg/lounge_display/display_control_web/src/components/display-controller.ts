@@ -4,7 +4,9 @@ import '@material/web/icon/icon.js';
 import '@material/web/iconbutton/icon-button.js';
 import '@material/web/divider/divider.js';
 import './lounge-display.js';
+import './setup-display.js';
 import { wsClient } from '../ws-client.js';
+import { WrapPromise } from 'standard-ts-lib/src/wrap_promise.js';
 
 @customElement('display-controller')
 export class DisplayController extends LitElement {
@@ -13,6 +15,9 @@ export class DisplayController extends LitElement {
 
   @state()
   private serverState: Record<string, any> = {};
+
+  @state()
+  private setupCompleted = false;
 
   private unsubscribe?: () => void;
 
@@ -152,16 +157,33 @@ export class DisplayController extends LitElement {
     }
   `;
 
-  connectedCallback() {
+  async connectedCallback() {
     super.connectedCallback();
+    
     this.unsubscribe = wsClient.onStateUpdate((state) => {
       this.serverState = state;
+      this.setupCompleted = state.setup_ready === true;
       // Close sidebar if entering a meeting or loading state
       const isInMeetingOrLoading = !!this.serverState.meeting_code && this.serverState.meeting_code !== 'landing';
       if (isInMeetingOrLoading && this.isOpen) {
         this.isOpen = false;
       }
     });
+
+    const res = await WrapPromise(fetch('/api/setup_done'), 'Failed to fetch setup status');
+    if (res.ok) {
+      const data = res.safeUnwrap();
+      if (data.ok) {
+        const jsonRes = await WrapPromise(data.json(), 'Failed to fetch setup status');
+        if (jsonRes.ok) {
+          this.setupCompleted = jsonRes.safeUnwrap().setup_ready === true;
+        } else {
+          console.error('Failed to fetch setup status', jsonRes.val);
+        }
+      }
+    } else {
+      console.error('Failed to fetch setup status', res.val);
+    }
   }
 
   disconnectedCallback() {
@@ -204,7 +226,11 @@ export class DisplayController extends LitElement {
           </div>
         </div>
         <div class="main-content">
-          <lounge-display style="flex-grow: 1;"></lounge-display>
+          ${this.setupCompleted ? html`
+            <lounge-display style="flex-grow: 1;"></lounge-display>
+          ` : html`
+            <setup-display style="flex-grow: 1;"></setup-display>
+          `}
         </div>
       </div>
     `;
