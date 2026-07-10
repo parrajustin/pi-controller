@@ -192,36 +192,36 @@ export class LoungeDisplay extends LitElement {
   private fetchTimeout?: number;
 
   private async fetchCalendarEvents() {
-    try {
-      const response = await wsClient.request({ type: 'calendar_events' });
-      const events: EventInfo[] = response || [];
-
-      if (!events) {
-        this.meetings = [];
-        this.updateMeetings();
-        return;
-      }
-
-      const newMeetings = events.map((e) => {
-        const start = parseISO(e.startTime);
-        const end = parseISO(e.endTime);
-        const lengthInSeconds = (end.getTime() - start.getTime()) / 1000;
-        const meetCode = e.meetLink ? e.meetLink.split('/').pop() : undefined;
-
-        return {
-          time: format(start, 'h:mm a'),
-          lengthInSeconds: Math.max(0, lengthInSeconds),
-          name: e.name,
-          status: '',
-          isActive: false,
-          meetCode,
-        };
-      });
-      this.meetings = newMeetings;
-      this.updateMeetings();
-    } catch (e) {
-      console.error('Failed to fetch calendar events', e);
+    const response = await wsClient.request({ type: 'calendar_events' });
+    if (response.err) {
+      console.error('Failed to fetch calendar events', response.val);
+      return;
     }
+    const events: EventInfo[] = response.safeUnwrap() || [];
+
+    if (!events) {
+      this.meetings = [];
+      this.updateMeetings();
+      return;
+    }
+
+    const newMeetings = events.map((e) => {
+      const start = parseISO(e.startTime);
+      const end = parseISO(e.endTime);
+      const lengthInSeconds = (end.getTime() - start.getTime()) / 1000;
+      const meetCode = e.meetLink ? e.meetLink.split('/').pop() : undefined;
+
+      return {
+        time: format(start, 'h:mm a'),
+        lengthInSeconds: Math.max(0, lengthInSeconds),
+        name: e.name,
+        status: '',
+        isActive: false,
+        meetCode,
+      };
+    });
+    this.meetings = newMeetings;
+    this.updateMeetings();
   }
 
   connectedCallback() {
@@ -260,22 +260,21 @@ export class LoungeDisplay extends LitElement {
 
   private async pollMeetingState() {
     if (this.serverState.current_node === 'In Meeting') {
-      try {
-        const meetResponse = await wsClient.request({ type: 'button_state' });
-        this.meetingState = meetResponse;
-      } catch (e) {
-        console.error('Failed to fetch button state', e);
+      const meetResponse = await wsClient.request({ type: 'button_state' });
+      if (meetResponse.ok) {
+        this.meetingState = meetResponse.safeUnwrap();
+      } else {
+        console.error('Failed to fetch button state', meetResponse.val);
       }
     }
   }
 
   private async clickMeetingButton(button: string) {
-    try {
-      await wsClient.request({ type: 'click_button', payload: { button } });
-      // Wait a bit to let the server update its state internally, or update manually
-    } catch (e) {
-      console.error('Failed to click button', e);
+    const res = await wsClient.request({ type: 'click_button', payload: { button } });
+    if (res.err) {
+      console.error('Failed to click button', res.val);
     }
+    // Wait a bit to let the server update its state internally, or update manually
     
     // Clear optimistic loading if we actually reached the meeting!
     if (this.serverState.current_node === 'In Meeting') {
@@ -301,10 +300,9 @@ export class LoungeDisplay extends LitElement {
       this.clearOptimisticLoading();
     }, 30000);
 
-    try {
-      await wsClient.request({ type: 'join_meeting', payload: { code } });
-    } catch (err) {
-      console.error('Failed to join meeting:', err);
+    const res = await wsClient.request({ type: 'join_meeting', payload: { code } });
+    if (res.err) {
+      console.error('Failed to join meeting:', res.val);
     }
   }
 

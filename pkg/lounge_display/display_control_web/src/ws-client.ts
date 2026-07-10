@@ -1,9 +1,10 @@
 import { getAppClock } from './clock-provider.js';
+import { Result, Ok, Err, StatusError, UnknownError, UnavailableError, Optional, None, Some } from 'standard-ts-lib/src/index.js';
 
 export class WSClient {
-  private ws: WebSocket | null = null;
+  private ws: Optional<WebSocket> = None;
   public readonly url: string;
-  private requestMap = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>();
+  private requestMap = new Map<string, { resolve: (val: Result<any, StatusError>) => void }>();
   private reqId = 0;
   private listeners = new Set<(state: any) => void>();
 
@@ -19,16 +20,21 @@ export class WSClient {
   }
 
   private connect() {
-    this.ws = new WebSocket(this.url);
+    const ws = new WebSocket(this.url);
+    this.ws = Some(ws);
 
-    this.ws.onopen = () => {
+    ws.onopen = () => {
       console.log('WS Connected');
-      this.request({ type: 'get_state', payload: {} }).then(state => {
-        this.notifyListeners(state);
-      }).catch(err => console.error("failed to get state", err));
+      this.request({ type: 'get_state', payload: {} }).then(res => {
+        if (res.ok) {
+          this.notifyListeners(res.safeUnwrap());
+        } else {
+          console.error("failed to get state", res.val);
+        }
+      });
     };
 
-    this.ws.onmessage = (event) => {
+    ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
       if (data.type === 'state_update') {
@@ -37,17 +43,18 @@ export class WSClient {
         const handler = this.requestMap.get(data.id);
         if (handler) {
           if (data.error) {
-            handler.reject(new Error(data.error));
+            handler.resolve(Err(UnknownError(data.error)));
           } else {
-            handler.resolve(data.payload);
+            handler.resolve(Ok(data.payload));
           }
           this.requestMap.delete(data.id);
         }
       }
     };
 
-    this.ws.onclose = () => {
+    ws.onclose = () => {
       console.log('WS Disconnected. Reconnecting in .5s...');
+      this.ws = None;
       getAppClock().setTimeout(async () => { this.connect(); }, 500);
     };
   }
@@ -63,16 +70,16 @@ export class WSClient {
     }
   }
 
-  public request(msg: { type: string; payload?: any }): Promise<any> {
-    return new Promise((resolve, reject) => {
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        return reject(new Error('WebSocket not connected'));
+  public request(msg: { type: string; payload?: any }): Promise<Result<any, StatusError>> {
+    return new Promise((resolve) => {
+      if (this.ws.none || this.ws.safeValue().readyState !== WebSocket.OPEN) {
+        return resolve(Err(UnavailableError('WebSocket not connected')));
       }
       
       const id = String(++this.reqId);
-      this.requestMap.set(id, { resolve, reject });
+      this.requestMap.set(id, { resolve });
 
-      this.ws.send(JSON.stringify({
+      this.ws.safeValue().send(JSON.stringify({
         id,
         type: msg.type,
         payload: msg.payload || {}

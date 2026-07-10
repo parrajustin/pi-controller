@@ -3,6 +3,7 @@ import { SetupDisplay } from './setup-display.js';
 import { wsClient } from '../ws-client.js';
 import { getAppClock, setAppClock } from '../clock-provider.js';
 import { FakeClock } from 'standard-ts-lib/src/clock.js';
+import { Ok, Err, UnknownError } from 'standard-ts-lib/src/index.js';
 
 // Mock QRCode
 jest.mock('qrcode', () => ({
@@ -17,7 +18,7 @@ describe('SetupDisplay', () => {
   beforeEach(() => {
     clock = new FakeClock(0);
     setAppClock(clock);
-    requestSpy = jest.spyOn(wsClient, 'request').mockResolvedValue({});
+    requestSpy = jest.spyOn(wsClient, 'request').mockResolvedValue(Ok({}));
     alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => {});
   });
 
@@ -45,8 +46,8 @@ describe('SetupDisplay', () => {
 
   it('handles Init Server node and wifi check', async () => {
     requestSpy.mockImplementation((req: any) => {
-      if (req.type === 'has_wifi') return Promise.resolve({ internetAccess: true });
-      return Promise.resolve({});
+      if (req.type === 'has_wifi') return Promise.resolve(Ok({ internetAccess: true }));
+      return Promise.resolve(Ok({}));
     });
     
     const el = document.createElement('setup-display') as SetupDisplay;
@@ -65,8 +66,8 @@ describe('SetupDisplay', () => {
 
   it('handles Init Server node without wifi', async () => {
     requestSpy.mockImplementation((req: any) => {
-      if (req.type === 'has_wifi') return Promise.resolve({ internetAccess: false });
-      return Promise.resolve({});
+      if (req.type === 'has_wifi') return Promise.resolve(Ok({ internetAccess: false }));
+      return Promise.resolve(Ok({}));
     });
     
     const el = document.createElement('setup-display') as SetupDisplay;
@@ -84,8 +85,8 @@ describe('SetupDisplay', () => {
 
   it('handles Credentials Phase', async () => {
     requestSpy.mockImplementation((req: any) => {
-      if (req.type === 'get_ip') return Promise.resolve({ ip: '192.168.1.100' });
-      return Promise.resolve({});
+      if (req.type === 'get_ip') return Promise.resolve(Ok({ ip: '192.168.1.100' }));
+      return Promise.resolve(Ok({}));
     });
     
     const el = document.createElement('setup-display') as SetupDisplay;
@@ -103,9 +104,9 @@ describe('SetupDisplay', () => {
 
   it('handles Auth Token Phase and token submission', async () => {
     requestSpy.mockImplementation((req: any) => {
-      if (req.type === 'get_auth_url') return Promise.resolve({ url: 'https://auth.example.com' });
-      if (req.type === 'submit_token') return Promise.resolve({ status: 'ok' });
-      return Promise.resolve({});
+      if (req.type === 'get_auth_url') return Promise.resolve(Ok({ url: 'https://auth.example.com' }));
+      if (req.type === 'submit_token') return Promise.resolve(Ok({ status: 'ok' }));
+      return Promise.resolve(Ok({}));
     });
     
     const el = document.createElement('setup-display') as SetupDisplay;
@@ -134,8 +135,8 @@ describe('SetupDisplay', () => {
 
   it('handles Password Input Page and submission', async () => {
     requestSpy.mockImplementation((req: any) => {
-      if (req.type === 'submit_password') return Promise.resolve({ status: 'ok' });
-      return Promise.resolve({});
+      if (req.type === 'submit_password') return Promise.resolve(Ok({ status: 'ok' }));
+      return Promise.resolve(Ok({}));
     });
     
     const el = document.createElement('setup-display') as SetupDisplay;
@@ -160,10 +161,10 @@ describe('SetupDisplay', () => {
   
   it('handles failed token and password submission', async () => {
     requestSpy.mockImplementation((req: any) => {
-      if (req.type === 'get_auth_url') return Promise.resolve({ url: 'https://auth.example.com' });
-      if (req.type === 'submit_token') return Promise.reject(new Error('fail'));
-      if (req.type === 'submit_password') return Promise.reject(new Error('fail'));
-      return Promise.resolve({});
+      if (req.type === 'get_auth_url') return Promise.resolve(Ok({ url: 'https://auth.example.com' }));
+      if (req.type === 'submit_token') return Promise.resolve(Err(UnknownError('fail')));
+      if (req.type === 'submit_password') return Promise.resolve(Err(UnknownError('fail')));
+      return Promise.resolve(Ok({}));
     });
     
     const el = document.createElement('setup-display') as SetupDisplay;
@@ -232,9 +233,9 @@ describe('SetupDisplay', () => {
 
   it('handles virtual keyboard logic', async () => {
     requestSpy.mockImplementation((req: any) => {
-      if (req.type === 'get_auth_url') return Promise.resolve({ url: 'https://auth.example.com' });
-      if (req.type === 'submit_token') return Promise.resolve({ status: 'ok' });
-      return Promise.resolve({});
+      if (req.type === 'get_auth_url') return Promise.resolve(Ok({ url: 'https://auth.example.com' }));
+      if (req.type === 'submit_token') return Promise.resolve(Ok({ status: 'ok' }));
+      return Promise.resolve(Ok({}));
     });
     
     const el = document.createElement('setup-display') as SetupDisplay;

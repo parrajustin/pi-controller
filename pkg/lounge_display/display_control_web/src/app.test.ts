@@ -126,7 +126,7 @@ describe('Display Control App Integration', () => {
 
     await nextFrame();
     
-    expect(consoleSpy).toHaveBeenCalledWith('Failed to fetch setup status', expect.any(Error));
+    expect(consoleSpy).toHaveBeenCalledWith('Failed to fetch setup status', expect.any(Object));
     consoleSpy.mockRestore();
   });
 });

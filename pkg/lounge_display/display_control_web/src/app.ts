@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import './components/setup-display.js';
 import './components/display-controller.js';
 import { wsClient } from './ws-client.js';
+import { WrapPromise } from 'standard-ts-lib/src/wrap_promise.js';
 
 @customElement('display-control-app')
 export class DisplayControlApp extends LitElement {
@@ -11,14 +12,19 @@ export class DisplayControlApp extends LitElement {
 
   async connectedCallback() {
     super.connectedCallback();
-    try {
-      const res = await fetch('/api/setup_done');
-      if (res.ok) {
-        const data = await res.json();
-        this.setupCompleted = data.setup_ready === true;
+    const res = await WrapPromise(fetch('/api/setup_done'), 'Failed to fetch setup status');
+    if (res.ok) {
+      const data = res.safeUnwrap();
+      if (data.ok) {
+        const jsonRes = await WrapPromise(data.json(), 'Failed to fetch setup status');
+        if (jsonRes.ok) {
+          this.setupCompleted = jsonRes.safeUnwrap().setup_ready === true;
+        } else {
+          console.error('Failed to fetch setup status', jsonRes.val);
+        }
       }
-    } catch (e) {
-      console.error('Failed to fetch setup status', e);
+    } else {
+      console.error('Failed to fetch setup status', res.val);
     }
 
     wsClient.onStateUpdate((state) => {

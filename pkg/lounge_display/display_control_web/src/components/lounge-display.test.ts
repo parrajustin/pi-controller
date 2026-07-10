@@ -1,6 +1,7 @@
 import { WSClient, wsClient } from '../ws-client.js';
 import { getAppClock, setAppClock } from '../clock-provider.js';
 import { FakeClock } from 'standard-ts-lib/src/clock.js';
+import { Ok, Err, UnknownError } from 'standard-ts-lib/src/index.js';
 import './lounge-display.js';
 import { LoungeDisplay } from './lounge-display.js';
 
@@ -18,7 +19,7 @@ describe('LoungeDisplay', () => {
   });
 
   it('renders default empty state correctly', async () => {
-    const requestStub = jest.spyOn(wsClient, 'request').mockResolvedValue([]);
+    const requestStub = jest.spyOn(wsClient, 'request').mockResolvedValue(Ok([]));
     
     const el = document.createElement('lounge-display') as LoungeDisplay;
     document.body.appendChild(el);
@@ -33,7 +34,7 @@ describe('LoungeDisplay', () => {
   });
 
   it('renders correctly when server state jumps directly to landing', async () => {
-    jest.spyOn(wsClient, 'request').mockResolvedValue([]);
+    jest.spyOn(wsClient, 'request').mockResolvedValue(Ok([]));
     
     const el = document.createElement('lounge-display') as LoungeDisplay;
     document.body.appendChild(el);
@@ -47,7 +48,7 @@ describe('LoungeDisplay', () => {
   });
 
   it('handles server reset to default node', async () => {
-    jest.spyOn(wsClient, 'request').mockResolvedValue([]);
+    jest.spyOn(wsClient, 'request').mockResolvedValue(Ok([]));
     
     const el = document.createElement('lounge-display') as LoungeDisplay;
     document.body.appendChild(el);
@@ -66,7 +67,7 @@ describe('LoungeDisplay', () => {
   });
 
   it('dispatches click_button via wsClient when controls are clicked', async () => {
-    jest.spyOn(wsClient, 'request').mockResolvedValue([]);
+    jest.spyOn(wsClient, 'request').mockResolvedValue(Ok([]));
     const requestStub = jest.spyOn(wsClient, 'request');
     
     const el = document.createElement('lounge-display') as LoungeDisplay;
@@ -100,7 +101,7 @@ describe('LoungeDisplay', () => {
   });
 
   it('starts optimistic loading and clears it correctly', async () => {
-    jest.spyOn(wsClient, 'request').mockResolvedValue([]);
+    jest.spyOn(wsClient, 'request').mockResolvedValue(Ok([]));
     const el = document.createElement('lounge-display') as LoungeDisplay;
     document.body.appendChild(el);
     await el.updateComplete;
@@ -122,8 +123,8 @@ describe('LoungeDisplay', () => {
 
   it('handles errors when joining a meeting', async () => {
     jest.spyOn(wsClient, 'request').mockImplementation((req: any) => {
-      if (req.type === 'join_meeting') return Promise.reject(new Error('Connection dropped'));
-      return Promise.resolve([]);
+      if (req.type === 'join_meeting') return Promise.resolve(Err(UnknownError('Connection dropped')));
+      return Promise.resolve(Ok([]));
     });
     const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     
@@ -134,12 +135,12 @@ describe('LoungeDisplay', () => {
     const event = new CustomEvent('join-meeting-start', { detail: { code: 'test-meeting' } });
     await (el as any).handleJoinMeetingStart(event);
     
-    expect(consoleSpy).toHaveBeenCalledWith('Failed to join meeting:', expect.any(Error));
+    expect(consoleSpy).toHaveBeenCalledWith('Failed to join meeting:', expect.any(Object));
     consoleSpy.mockRestore();
   });
 
   it('clears intervals and timeouts on disconnectedCallback', async () => {
-    jest.spyOn(wsClient, 'request').mockResolvedValue([]);
+    jest.spyOn(wsClient, 'request').mockResolvedValue(Ok([]));
     const el = document.createElement('lounge-display') as LoungeDisplay;
     document.body.appendChild(el);
     
@@ -160,7 +161,7 @@ describe('LoungeDisplay', () => {
   });
 
   it('handles empty events correctly', async () => {
-    jest.spyOn(wsClient, 'request').mockResolvedValue(null);
+    jest.spyOn(wsClient, 'request').mockResolvedValue(Ok(null));
     
     const el = document.createElement('lounge-display') as LoungeDisplay;
     document.body.appendChild(el);
@@ -177,8 +178,8 @@ describe('LoungeDisplay', () => {
 
   it('handles button state fetch errors', async () => {
     jest.spyOn(wsClient, 'request').mockImplementation((req: any) => {
-      if (req.type === 'button_state') return Promise.reject(new Error('fail'));
-      return Promise.resolve([]);
+      if (req.type === 'button_state') return Promise.resolve(Err(UnknownError('fail')));
+      return Promise.resolve(Ok([]));
     });
     
     const el = document.createElement('lounge-display') as LoungeDisplay;

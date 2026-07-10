@@ -345,7 +345,7 @@ export class SetupDisplay extends LitElement {
         this.lastProcessedNode = this.currentNode;
         
         let hostIp = window.location.host;
-        const ipRes = await WrapPromise(wsClient.request({ type: 'get_ip' }), 'Failed to fetch IP');
+        const ipRes = await wsClient.request({ type: 'get_ip' });
         if (ipRes.ok) {
           const ipData = ipRes.safeUnwrap();
           if (ipData && ipData.ip) {
@@ -373,7 +373,7 @@ export class SetupDisplay extends LitElement {
       if (this.lastProcessedNode !== this.currentNode) {
         this.lastProcessedNode = this.currentNode;
         
-        const authUrlRes = await WrapPromise(wsClient.request({ type: 'get_auth_url' }), 'Failed to fetch auth url');
+        const authUrlRes = await wsClient.request({ type: 'get_auth_url' });
         if (authUrlRes.ok) {
           const authUrlData = authUrlRes.safeUnwrap();
           if (authUrlData && authUrlData.url) {
@@ -437,7 +437,7 @@ export class SetupDisplay extends LitElement {
     if (!input || !input.value) return;
 
     const token = input.value;
-    const res = await WrapPromise(wsClient.request({ type: 'submit_token', payload: { code: token } }), 'Failed to post token');
+    const res = await wsClient.request({ type: 'submit_token', payload: { code: token } });
 
     if (res.ok && res.safeUnwrap().status === 'ok') {
       input.value = '';
@@ -453,7 +453,7 @@ export class SetupDisplay extends LitElement {
     if (!input || !input.value) return;
 
     const password = input.value;
-    const res = await WrapPromise(wsClient.request({ type: 'submit_password', payload: { password } }), 'Failed to post password');
+    const res = await wsClient.request({ type: 'submit_password', payload: { password } });
 
     if (res.ok && res.safeUnwrap().status === 'ok') {
       input.value = '';
@@ -464,7 +464,7 @@ export class SetupDisplay extends LitElement {
   }
 
   private async checkStage1(): Promise<boolean> {
-    const res = await WrapPromise(wsClient.request({ type: 'has_wifi' }), 'failed fetch');
+    const res = await wsClient.request({ type: 'has_wifi' });
     if (!res.ok) return false;
     
     const data = res.safeUnwrap();

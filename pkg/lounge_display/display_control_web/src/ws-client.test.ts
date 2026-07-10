@@ -2,6 +2,7 @@ import WS from 'jest-websocket-mock';
 import { wsClient, WSClient } from './ws-client.js';
 import { getAppClock, setAppClock } from './clock-provider.js';
 import { FakeClock } from 'standard-ts-lib/src/clock.js';
+import { Ok, Err, UnknownError } from 'standard-ts-lib/src/index.js';
 
 describe('ws-client', () => {
   let server: WS;
@@ -43,10 +44,11 @@ describe('ws-client', () => {
     server.send({ id: '2', type: 'response', payload: { success: true } });
     
     const result = await requestPromise;
-    expect(result).toEqual({ success: true });
+    expect(result.ok).toBe(true);
+    expect(result.safeUnwrap()).toEqual({ success: true });
   });
 
-  it('rejects promises when error is returned', async () => {
+  it('resolves with an Err when error is returned', async () => {
     const client = new WSClient();
     await server.connected;
     
@@ -58,7 +60,9 @@ describe('ws-client', () => {
     
     server.send({ id: '2', type: 'response', error: 'Internal Error' });
     
-    await expect(requestPromise).rejects.toThrow('Internal Error');
+    const result = await requestPromise;
+    expect(result.err).toBe(true);
+    expect(result.val.message).toBe('Internal Error');
   });
 
   it('notifies listeners on state_update push messages', async () => {
@@ -85,7 +89,7 @@ describe('ws-client', () => {
     
     // Simulate close by invoking the internal onclose callback
     // (since JSDOM mock WebSocket closing can be flaky/asynchronous)
-    const ws = (client as any).ws;
+    const ws = (client as any).ws.safeValue();
     ws.onclose();
     
     // Clean up the first mock server before the timeout executes the reconnection
