@@ -86,6 +86,15 @@ test.describe('Lounge Display Visual Regression', () => {
     await page.clock.fastForward(1500);
     await expect(page).toHaveScreenshot('02-setup-upload-credentials.png');
 
+    // Open sidebar in setup
+    await page.locator('.toggle-btn').click();
+    await page.clock.fastForward(500); // Wait for transition
+    await expect(page).toHaveScreenshot('02b-setup-sidebar-open.png');
+
+    // Close sidebar
+    await page.locator('.toggle-btn').click();
+    await page.clock.fastForward(500);
+
     // =========================================
     // STATE 3: Setup - Get Auth Token
     // =========================================
@@ -205,5 +214,14 @@ test.describe('Lounge Display Visual Regression', () => {
 
     await page.clock.fastForward(1000);
     await expect(page).toHaveScreenshot('11-in-meeting-hand-raised.png');
+
+    // Open sidebar in meet control
+    await page.locator('.toggle-btn').click();
+    await page.clock.fastForward(500); // Wait for transition
+    await expect(page).toHaveScreenshot('11b-in-meeting-sidebar-open.png');
+
+    // Close sidebar
+    await page.locator('.toggle-btn').click();
+    await page.clock.fastForward(500);
   });
 });

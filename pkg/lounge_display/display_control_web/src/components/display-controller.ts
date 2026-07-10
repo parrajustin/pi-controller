@@ -33,10 +33,14 @@ export class DisplayController extends LitElement {
       display: flex;
       width: 100%;
       height: 100%;
+      position: relative;
     }
 
     .sidebar {
-      position: relative;
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%;
       display: flex;
       flex-direction: column;
       background-color: var(--card-bg, #28292c);
@@ -154,6 +158,7 @@ export class DisplayController extends LitElement {
     .main-content {
       flex: 1;
       display: flex;
+      margin-left: 5px; /* Offset the 5px sidebar closed width */
     }
   `;
 
@@ -163,11 +168,6 @@ export class DisplayController extends LitElement {
     this.unsubscribe = wsClient.onStateUpdate((state) => {
       this.serverState = state;
       this.setupCompleted = state.setup_ready === true;
-      // Close sidebar if entering a meeting or loading state
-      const isInMeetingOrLoading = !!this.serverState.meeting_code && this.serverState.meeting_code !== 'landing';
-      if (isInMeetingOrLoading && this.isOpen) {
-        this.isOpen = false;
-      }
     });
 
     const res = await WrapPromise(fetch('/api/setup_done'), 'Failed to fetch setup status');
@@ -198,11 +198,9 @@ export class DisplayController extends LitElement {
   }
 
   render() {
-    const isInMeetingOrLoading = !!this.serverState.meeting_code && this.serverState.meeting_code !== 'landing';
-    
     return html`
       <div class="container">
-        <div class="sidebar ${this.isOpen ? 'open' : ''} ${isInMeetingOrLoading ? 'hidden' : ''}">
+        <div class="sidebar ${this.isOpen ? 'open' : ''}">
           <button class="toggle-btn" @click=${this.toggleSidebar}>
             <md-icon>${this.isOpen ? 'chevron_left' : 'chevron_right'}</md-icon>
           </button>
