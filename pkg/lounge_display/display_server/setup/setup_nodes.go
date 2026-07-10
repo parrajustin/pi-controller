@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/cryptoutil"
+	"github.com/parrajustin/pi-controller/pkg/lounge_display/calendarclient"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
@@ -224,12 +224,12 @@ func init() {
 			}
 			hasToken = true
 			
-			// Also initialize the CalendarSrv here so we have it later
+			// Also initialize the CalendarClient here so we have it later
 			ctx := context.Background()
 			client := config.Client(ctx, tok)
 			srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
 			if err == nil {
-				s.CalendarSrv = srv
+				s.CalendarClient = calendarclient.NewRealCalendarClient(srv)
 			}
 
 			return nil
@@ -241,15 +241,13 @@ func init() {
 		PreCheck: func(s *StateContext) bool { return true },
 		Work: func(s *StateContext) error {
 			for {
-				t := time.Now().Format(time.RFC3339)
-				if s.CalendarSrv == nil {
-					return fmt.Errorf("CalendarSrv is nil")
+				if s.CalendarClient == nil {
+					return fmt.Errorf("CalendarClient is nil")
 				}
-				_, err := s.CalendarSrv.Events.List("primary").ShowDeleted(false).
-					SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
+				err := s.CalendarClient.TestConnection()
 				if err != nil {
 					fmt.Printf("Unable to retrieve calendar events: %v, retrying in 5 seconds...\n", err)
-					time.Sleep(5 * time.Second)
+					s.Clock.Sleep(5 * time.Second)
 					continue
 				}
 				fmt.Println("Calendar events fetched successfully!")
@@ -261,15 +259,14 @@ func init() {
 	WorkspaceRedirectedNode = &Node{
 		Name: "Workspace Redirected",
 		PreCheck: func(s *StateContext) bool {
-			var urlStr string
-			chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			urlStr, err := s.Browser.Location()
+			if err != nil { return false }
 			u, err := url.Parse(urlStr)
 			return err == nil && u.Host == "workspace.google.com"
 		},
 		Work: func(s *StateContext) error {
 			var res string
-			return chromedp.Run(s.TargetCtx,
-				chromedp.Evaluate(`
+			if err := s.Browser.Evaluate(`
 					(function() {
 						let btns = Array.from(document.querySelectorAll('a[data-g-action="sign in"]'));
 						let visibleBtn = btns.find(b => b.offsetWidth > 0 && b.offsetHeight > 0);
@@ -279,17 +276,18 @@ func init() {
 						}
 						return "not found";
 					})();
-				`, &res),
-				chromedp.Sleep(3*time.Second),
-			)
+				`, &res); err != nil {
+				return err
+			}
+			return s.Browser.Sleep(3*time.Second)
 		},
 	}
 
 	AccountsGooglePageNode = &Node{
 		Name: "Accounts Google Page",
 		PreCheck: func(s *StateContext) bool {
-			var urlStr string
-			chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			urlStr, err := s.Browser.Location()
+			if err != nil { return false }
 			u, err := url.Parse(urlStr)
 			return err == nil && u.Host == "accounts.google.com"
 		},
@@ -299,13 +297,13 @@ func init() {
 		Name: "Choose Account Page",
 		PreCheck: func(s *StateContext) bool {
 			var found bool
-			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+			s.Browser.Evaluate(`
 				(function() {
 					let el = document.querySelector('div[data-identifier], div[data-email], #profileIdentifier, .w1I7fb');
 					let txt = document.body.innerText.toLowerCase();
 					return (el !== null) || txt.includes("choose an account");
 				})();
-			`, &found))
+			`, &found)
 			return found
 		},
 	}
@@ -314,18 +312,17 @@ func init() {
 		Name: "Account Option Exists",
 		PreCheck: func(s *StateContext) bool {
 			var found bool
-			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+			s.Browser.Evaluate(`
 				(function() {
 					let txt = document.body.innerText.toLowerCase();
 					return txt.includes("`+s.Email+`");
 				})();
-			`, &found))
+			`, &found)
 			return found
 		},
 		Work: func(s *StateContext) error {
 			var res string
-			return chromedp.Run(s.TargetCtx,
-				chromedp.Evaluate(`
+			if err := s.Browser.Evaluate(`
 					(function() {
 						let els = Array.from(document.querySelectorAll('div'));
 						let el = els.find(e => e.innerText && e.innerText.includes("`+s.Email+`") && e.getAttribute("data-identifier"));
@@ -338,9 +335,10 @@ func init() {
 						}
 						return "not found";
 					})();
-				`, &res),
-				chromedp.Sleep(2*time.Second),
-			)
+				`, &res); err != nil {
+				return err
+			}
+			return s.Browser.Sleep(2*time.Second)
 		},
 	}
 
@@ -348,18 +346,17 @@ func init() {
 		Name: "Account Option Missing",
 		PreCheck: func(s *StateContext) bool {
 			var found bool
-			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+			s.Browser.Evaluate(`
 				(function() {
 					let txt = document.body.innerText.toLowerCase();
 					return txt.includes("use another account");
 				})();
-			`, &found))
+			`, &found)
 			return found
 		},
 		Work: func(s *StateContext) error {
 			var res string
-			return chromedp.Run(s.TargetCtx,
-				chromedp.Evaluate(`
+			if err := s.Browser.Evaluate(`
 					(function() {
 						let els = Array.from(document.querySelectorAll('div'));
 						let el = els.find(e => e.innerText && e.innerText.toLowerCase() === "use another account");
@@ -369,9 +366,10 @@ func init() {
 						}
 						return "not found";
 					})();
-				`, &res),
-				chromedp.Sleep(2*time.Second),
-			)
+				`, &res); err != nil {
+				return err
+			}
+			return s.Browser.Sleep(2*time.Second)
 		},
 	}
 
@@ -379,19 +377,17 @@ func init() {
 		Name: "Email Input Page",
 		PreCheck: func(s *StateContext) bool {
 			var exists bool
-			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`document.querySelector('#identifierId') !== null`, &exists))
+			s.Browser.Evaluate(`document.querySelector('#identifierId') !== null`, &exists)
 			return exists
 		},
 		Work: func(s *StateContext) error {
-			return chromedp.Run(s.TargetCtx,
-				chromedp.WaitVisible(`#identifierId`, chromedp.ByID),
-				chromedp.Click(`#identifierId`, chromedp.ByID),
-				chromedp.Sleep(500*time.Millisecond),
-				chromedp.SendKeys(`#identifierId`, s.Email, chromedp.ByID),
-				chromedp.Sleep(500*time.Millisecond),
-				chromedp.Click(`#identifierNext button`, chromedp.ByQuery),
-				chromedp.Sleep(3*time.Second),
-			)
+			if err := s.Browser.WaitVisible(`#identifierId`, true); err != nil { return err }
+			if err := s.Browser.Click(`#identifierId`, true); err != nil { return err }
+			if err := s.Browser.Sleep(500*time.Millisecond); err != nil { return err }
+			if err := s.Browser.SendKeys(`#identifierId`, s.Email, true); err != nil { return err }
+			if err := s.Browser.Sleep(500*time.Millisecond); err != nil { return err }
+			if err := s.Browser.Click(`#identifierNext button`, false); err != nil { return err }
+			return s.Browser.Sleep(3*time.Second)
 		},
 	}
 
@@ -416,18 +412,16 @@ func init() {
 		},
 		PreCheck: func(s *StateContext) bool {
 			var exists bool
-			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`document.querySelector('input[type="password"]') !== null && document.querySelector('input[type="password"]').offsetWidth > 0`, &exists))
+			s.Browser.Evaluate(`document.querySelector('input[type="password"]') !== null && document.querySelector('input[type="password"]').offsetWidth > 0`, &exists)
 			return exists
 		},
 		Work: func(s *StateContext) error {
 			fmt.Println("Waiting for password on POST /api/password ...")
 			password := <-s.PasswordChan
-			return chromedp.Run(s.TargetCtx,
-				chromedp.SendKeys(`input[type="password"]`, password, chromedp.ByQuery),
-				chromedp.Sleep(500*time.Millisecond),
-				chromedp.Click(`#passwordNext button`, chromedp.ByQuery),
-				chromedp.Sleep(3*time.Second),
-			)
+			if err := s.Browser.SendKeys(`input[type="password"]`, password, false); err != nil { return err }
+			if err := s.Browser.Sleep(500*time.Millisecond); err != nil { return err }
+			if err := s.Browser.Click(`#passwordNext button`, false); err != nil { return err }
+			return s.Browser.Sleep(3*time.Second)
 		},
 	}
 
@@ -435,14 +429,14 @@ func init() {
 		Name: "Wrong Password",
 		PreCheck: func(s *StateContext) bool {
 			var errorText string
-			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+			s.Browser.Evaluate(`
 				(function() {
 					let els = Array.from(document.querySelectorAll('span, div'));
 					let errEl = els.find(e => e.innerText && (e.innerText.toLowerCase().includes('wrong password') || e.innerText.toLowerCase().includes('incorrect')) && e.offsetWidth > 0);
 					if (errEl) return errEl.innerText.trim();
 					return "";
 				})();
-			`, &errorText))
+			`, &errorText)
 			return errorText != ""
 		},
 		Work: func(s *StateContext) error {
@@ -454,32 +448,34 @@ func init() {
 	TwoFactorNode = &Node{
 		Name: "2FA or Authenticated",
 		PreCheck: func(s *StateContext) bool {
-			var urlStr string
-			chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
-			u, err := url.Parse(urlStr)
-			if err == nil && u.Host != "accounts.google.com" {
-				return true
+			urlStr, err := s.Browser.Location()
+			if err == nil {
+				u, err := url.Parse(urlStr)
+				if err == nil && u.Host != "accounts.google.com" {
+					return true
+				}
 			}
 			var found bool
-			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+			s.Browser.Evaluate(`
 				(function() {
 					let txt = document.body.innerText.toLowerCase();
 					return txt.includes('2-step verification') || txt.includes('verifying it');
 				})();
-			`, &found))
+			`, &found)
 			return found
 		},
 		DoneCheck: func(s *StateContext) error {
 			fmt.Println("Polling for 2FA completion (up to 10 minutes)...")
-			deadline := time.Now().Add(10 * time.Minute)
-			for time.Now().Before(deadline) {
-				var urlStr string
-				chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
-				u, err := url.Parse(urlStr)
-				if err == nil && (u.Host == "meet.google.com" || u.Host == "workspace.google.com") {
-					return nil
+			deadline := s.Clock.Now().Add(10 * time.Minute)
+			for s.Clock.Now().Before(deadline) {
+				urlStr, err := s.Browser.Location()
+				if err == nil {
+					u, err := url.Parse(urlStr)
+					if err == nil && (u.Host == "meet.google.com" || u.Host == "workspace.google.com") {
+						return nil
+					}
 				}
-				time.Sleep(15 * time.Second)
+				s.Clock.Sleep(15 * time.Second)
 			}
 			return fmt.Errorf("timed out waiting for 2FA completion")
 		},

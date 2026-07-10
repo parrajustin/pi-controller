@@ -16,7 +16,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/display_server/setup"
-	"google.golang.org/api/calendar/v3"
 )
 
 // applyHeaders adds headers to fix CORS and CSP (Content Security Policy) issues.
@@ -74,64 +73,7 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-type EventInfo struct {
-	Name        string `json:"name"`
-	StartTime   string `json:"startTime"`
-	EndTime     string `json:"endTime"`
-	Accepted    string `json:"acceptedStatus"`
-	Description string `json:"description"`
-	MeetLink    string `json:"meetLink"`
-}
 
-func fetchCalendarEvents(srv *calendar.Service) ([]EventInfo, error) {
-	tMin := time.Now().Add(-15 * time.Minute).Format(time.RFC3339)
-	tMax := time.Now().Add(24 * time.Hour).Format(time.RFC3339)
-	events, err := srv.Events.List("primary").ShowDeleted(false).
-		SingleEvents(true).TimeMin(tMin).TimeMax(tMax).MaxResults(10).OrderBy("startTime").Do()
-	if err != nil {
-		return nil, err
-	}
-
-	var results []EventInfo
-	for _, item := range events.Items {
-		startDate := item.Start.DateTime
-		if startDate == "" {
-			startDate = item.Start.Date
-		}
-		endDate := ""
-		if item.End != nil {
-			endDate = item.End.DateTime
-			if endDate == "" {
-				endDate = item.End.Date
-			}
-		}
-
-		acceptedStatus := "unknown"
-		for _, attendee := range item.Attendees {
-			if attendee.Self {
-				acceptedStatus = attendee.ResponseStatus
-				break
-			}
-		}
-		if len(item.Attendees) == 0 {
-			acceptedStatus = "accepted"
-		}
-
-		if acceptedStatus == "declined" {
-			continue
-		}
-
-		results = append(results, EventInfo{
-			Name:        item.Summary,
-			StartTime:   startDate,
-			EndTime:     endDate,
-			Accepted:    acceptedStatus,
-			Description: item.Description,
-			MeetLink:    item.HangoutLink,
-		})
-	}
-	return results, nil
-}
 
 func getLocalIP() string {
 	if hostIP := os.Getenv("HOST_IP"); hostIP != "" {
@@ -269,11 +211,15 @@ func main() {
 				resPayload = map[string]string{"status": status}
 			case "calendar_events":
 				log.Printf("[WS] Received message %q (ID: %s) -> Routing to Global handler", req.Type, req.ID)
-				events, err := fetchCalendarEvents(stateCtx.CalendarSrv)
-				if err != nil {
-					resErr = err
+				if stateCtx.CalendarClient != nil {
+					events, err := stateCtx.CalendarClient.FetchEvents()
+					if err != nil {
+						resErr = err
+					} else {
+						resPayload = events
+					}
 				} else {
-					resPayload = events
+					resErr = fmt.Errorf("calendar client not initialized")
 				}
 			default:
 				// Node-specific WS handlers

@@ -11,9 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/chromedp/chromedp"
+
 	"github.com/gorilla/websocket"
-	"google.golang.org/api/calendar/v3"
+	"github.com/parrajustin/pi-controller/pkg/lounge_display/browser"
+	"github.com/parrajustin/pi-controller/pkg/lounge_display/calendarclient"
 )
 
 type StateContext struct {
@@ -22,8 +23,10 @@ type StateContext struct {
 	Phase       string
 	SetupPhase  int
 
-	Ctx       context.Context
-	TargetCtx context.Context
+	Browser        browser.Browser
+	CalendarClient calendarclient.CalendarClient
+	Ctx            context.Context
+	Clock          Clock
 
 	Mux *http.ServeMux
 
@@ -33,7 +36,6 @@ type StateContext struct {
 	OauthDir    string
 	MeetingCode string
 
-	CalendarSrv *calendar.Service
 
 	DefaultNode *Node
 	NavTarget   string
@@ -210,23 +212,17 @@ type Node struct {
 }
 
 func captureDebugArtifacts(s *StateContext, stepName, phase, prefix string) {
-	if s.TargetCtx == nil {
+	if s.Browser == nil {
 		return
 	}
 	fmt.Printf("Capturing artifacts for %s (%s)...\n", stepName, phase)
 	var html string
 	var screenshotBuf []byte
 
-	captureCtx, cancel := context.WithTimeout(s.TargetCtx, 5*time.Second)
-	defer cancel()
-
-	err := chromedp.Run(captureCtx,
-		// use ByQuery to wait for something or just OuterHTML
-		chromedp.OuterHTML("html", &html, chromedp.ByQuery),
-		chromedp.CaptureScreenshot(&screenshotBuf),
-	)
-	if err != nil {
-		log.Printf("Warning: Failed to capture artifacts for %s: %v\n", stepName, err)
+	errHTML := s.Browser.OuterHTML("html", &html)
+	errImg := s.Browser.CaptureScreenshot(&screenshotBuf)
+	if errHTML != nil || errImg != nil {
+		log.Printf("Warning: Failed to capture artifacts for %s: %v %v\n", stepName, errHTML, errImg)
 		return
 	}
 
@@ -247,6 +243,9 @@ func captureDebugArtifacts(s *StateContext, stepName, phase, prefix string) {
 }
 
 func RunEngine(startNode *Node, s *StateContext) {
+	if s.Clock == nil {
+		s.Clock = &RealClock{}
+	}
 	currentNode := startNode
 	if s.DefaultNode == nil {
 		s.DefaultNode = startNode
@@ -274,7 +273,7 @@ func RunEngine(startNode *Node, s *StateContext) {
 			}
 		}
 
-		if s.TargetCtx != nil && currentNode.Name != "Init Server" && currentNode.Name != "Auth Phase" && currentNode.Name != "Calendar Logic Phase" {
+		if s.Browser != nil && currentNode.Name != "Init Server" && currentNode.Name != "Auth Phase" && currentNode.Name != "Calendar Logic Phase" {
 			captureDebugArtifacts(s, strings.ReplaceAll(strings.ToLower(currentNode.Name), " ", "_"), "pre", "display_")
 		}
 
@@ -285,13 +284,13 @@ func RunEngine(startNode *Node, s *StateContext) {
 			if err != nil {
 				log.Printf("Work failed for node %s: %v\n", currentNode.Name, err)
 				if currentNode == startNode {
-					time.Sleep(2 * time.Second)
+					s.Clock.Sleep(2 * time.Second)
 					continue
 				}
 			}
 		}
 
-		if s.TargetCtx != nil && currentNode.Name != "Init Server" && currentNode.Name != "Auth Phase" && currentNode.Name != "Calendar Logic Phase" {
+		if s.Browser != nil && currentNode.Name != "Init Server" && currentNode.Name != "Auth Phase" && currentNode.Name != "Calendar Logic Phase" {
 			captureDebugArtifacts(s, strings.ReplaceAll(strings.ToLower(currentNode.Name), " ", "_"), "post", "display_")
 		}
 
@@ -322,10 +321,10 @@ func RunEngine(startNode *Node, s *StateContext) {
 		} else {
 			timeout = 5 * time.Minute
 		}
-		deadline := time.Now().Add(timeout)
+		deadline := s.Clock.Now().Add(timeout)
 
 		for nextNode == nil {
-			if !currentNode.IsRestNode && time.Now().After(deadline) {
+			if !currentNode.IsRestNode && s.Clock.Now().After(deadline) {
 				fmt.Printf("Non-rest node timeout reached (%v).\n", timeout)
 				break
 			}
@@ -362,13 +361,12 @@ func RunEngine(startNode *Node, s *StateContext) {
 				}
 			}
 
-			time.Sleep(500 * time.Millisecond)
+			s.Clock.Sleep(500 * time.Millisecond)
 		}
 
 		if nextNode == nil {
 			fmt.Println("\nERROR: No valid next path found! Restarting flow.")
-			currentNode = s.DefaultNode
-			continue
+			nextNode = s.DefaultNode
 		}
 
 		if currentNode.Teardown != nil {

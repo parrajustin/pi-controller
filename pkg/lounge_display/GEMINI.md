@@ -73,3 +73,10 @@ Google Meet employs advanced anti-bot heuristics in its UI. Specifically, its in
 * **Avoid `.click()`**: Using standard JavaScript evaluation in `chromedp.Evaluate` (e.g. `document.querySelector('button').click()`) will fail silently in Meet because the simulated event is untrusted.
 * **CDP Clicks**: You MUST use low-level CDP commands like `chromedp.Click` (`Input.dispatchMouseEvent`). This directly commands the Chrome binary to perform a hardware-level click on the element, effortlessly bypassing `isTrusted` validation. 
 * **State Polling**: Meet UI components are heavily dynamic. When navigating to a meeting, the engine uses robust polling loops (using JS evaluation injected into the page) to patiently wait for target buttons to drop their `disabled` or `aria-disabled="true"` flags before initiating the trusted CDP click.
+
+## Websocket APIs
+
+The `display_server` communicates with the UI clients primarily through WebSockets. The complete documentation of all emitted events and client-invoked methods (including when they become available and when they are removed during state transitions) is maintained in `pkg/lounge_display/display_server/ws_documentation.md`.
+
+> [!IMPORTANT]
+> **WS Documentation Requirement**: Any time a new WebSocket event is added, or an existing WebSocket method is removed/modified in the engine, you MUST update the [ws_documentation.md](display_server/ws_documentation.md) file to reflect these changes.

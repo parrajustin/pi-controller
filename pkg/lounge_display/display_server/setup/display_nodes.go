@@ -13,6 +13,7 @@ import (
 
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
+	"github.com/parrajustin/pi-controller/pkg/lounge_display/browser"
 )
 
 var (
@@ -60,20 +61,22 @@ func init() {
 					}
 					if activeTarget != nil {
 						targetCtx, _ := chromedp.NewContext(allocCtx, chromedp.WithTargetID(activeTarget.TargetID))
+						
+						// Initialize real browser here
+						s.Browser = browser.NewRealBrowser(targetCtx)
 						s.Ctx = ctx
-						s.TargetCtx = targetCtx
-
-						if err := chromedp.Run(targetCtx); err != nil {
-							fmt.Printf("Init target run failed: %v\n", err)
-							continue
+						// Keep target ctx around in case we need it elsewhere (or it gets GC'd)
+						
+						// Check if connection works
+						var tmp string
+						if _, err := s.Browser.Location(); err == nil || tmp == "" { // Ignore error for init
+							fmt.Println("CDP Connected.")
+							return nil
 						}
-
-						fmt.Println("CDP Connected.")
-						return nil
 					}
 				}
 				fmt.Println("Failed to connect to CDP or find target. Retrying in 5 seconds...")
-				time.Sleep(5 * time.Second)
+				s.Clock.Sleep(5 * time.Second)
 			}
 		},
 	}
@@ -87,10 +90,10 @@ func init() {
 		},
 		Work: func(s *StateContext) error {
 			fmt.Println("Navigating to https://meet.google.com/landing")
-			return chromedp.Run(s.TargetCtx,
-				chromedp.Navigate("https://meet.google.com/landing"),
-				chromedp.Sleep(4*time.Second),
-			)
+			if err := s.Browser.Navigate("https://meet.google.com/landing"); err != nil {
+				return err
+			}
+			return s.Browser.Sleep(4*time.Second)
 		},
 	}
 
@@ -105,8 +108,7 @@ func init() {
 				return false
 			}
 
-			var urlStr string
-			err := chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			urlStr, err := s.Browser.Location()
 			if err != nil {
 				return false
 			}
@@ -114,8 +116,7 @@ func init() {
 			return err == nil && u.Host == "meet.google.com" && u.Path == "/landing"
 		},
 		RestNodeValidation: func(s *StateContext) bool {
-			var urlStr string
-			err := chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			urlStr, err := s.Browser.Location()
 			if err != nil {
 				return false
 			}
@@ -138,8 +139,7 @@ func init() {
 			return nil
 		},
 		Work: func(s *StateContext) error {
-			var urlStr string
-			_ = chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			urlStr, _ := s.Browser.Location()
 			log.Printf("Entered Meet Landing Page. Current URL: %s\n", urlStr)
 			
 			s.mu.Lock()
@@ -160,8 +160,7 @@ func init() {
 	CheckInvalidMeetingNode = &Node{
 		Name: "Check Invalid Meeting",
 		PreCheck: func(s *StateContext) bool {
-			var urlStr string
-			err := chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			urlStr, err := s.Browser.Location()
 			if err != nil {
 				return false
 			}
@@ -190,8 +189,7 @@ func init() {
 				return false
 			}
 
-			var urlStr string
-			err := chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			urlStr, err := s.Browser.Location()
 			if err != nil {
 				return false
 			}
@@ -201,19 +199,19 @@ func init() {
 			}
 
 			var hasJoinBtn bool
-			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+			s.Browser.Evaluate(`
 				(function() {
 					let btns = Array.from(document.querySelectorAll('button, div[role="button"], span'));
 					return btns.some(b => b.innerText && (b.innerText.toLowerCase().includes('join now') || b.innerText.toLowerCase().includes('ask to join') || b.innerText.toLowerCase().includes('join anyway')) && b.offsetWidth > 0 && b.offsetHeight > 0);
 				})();
-			`, &hasJoinBtn))
+			`, &hasJoinBtn)
 			
 			return !hasJoinBtn
 		},
 		Setup: func(s *StateContext) error {
 			s.AddWSHandler("button_state", func(payload json.RawMessage) (interface{}, error) {
 				var stateJSON string
-				err := chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+				err := s.Browser.Evaluate(`
 					(function() {
 						let micBtn = document.querySelector('button[aria-label*="microphone" i]');
 						let camBtn = document.querySelector('button[aria-label*="camera" i]');
@@ -230,7 +228,7 @@ func init() {
 							hand: handRaised
 						});
 					})();
-				`, &stateJSON))
+				`, &stateJSON)
 				if err != nil {
 					return nil, err
 				}
@@ -262,7 +260,7 @@ func init() {
 				}
 
 				var clicked bool
-				err := chromedp.Run(s.TargetCtx, chromedp.Evaluate(fmt.Sprintf(`
+				err := s.Browser.Evaluate(fmt.Sprintf(`
 					(function() {
 						let btn = document.querySelector('%s');
 						if (btn) {
@@ -271,7 +269,7 @@ func init() {
 						}
 						return false;
 					})();
-				`, query), &clicked))
+				`, query), &clicked)
 				if err != nil {
 					return nil, err
 				}
@@ -280,8 +278,7 @@ func init() {
 			return nil
 		},
 		Work: func(s *StateContext) error {
-			var urlStr string
-			_ = chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			urlStr, _ := s.Browser.Location()
 			log.Printf("Entered In Meeting. Current URL: %s\n", urlStr)
 			u, _ := url.Parse(urlStr)
 			if u != nil {
@@ -325,15 +322,10 @@ func init() {
 			meetURL := fmt.Sprintf("https://meet.google.com/%s", code)
 			fmt.Printf("Joining meeting: %s\n", meetURL)
 
-			err := chromedp.Run(s.TargetCtx,
-				chromedp.Navigate(meetURL),
-				chromedp.Sleep(4*time.Second),
-			)
-			if err != nil {
+			if err := s.Browser.Navigate(meetURL); err != nil {
 				return fmt.Errorf("failed to navigate: %w", err)
 			}
-
-			return nil
+			return s.Browser.Sleep(4*time.Second)
 		},
 	}
 
@@ -347,8 +339,7 @@ func init() {
 				return false
 			}
 
-			var urlStr string
-			err := chromedp.Run(s.TargetCtx, chromedp.Location(&urlStr))
+			urlStr, err := s.Browser.Location()
 			if err != nil {
 				return false
 			}
@@ -358,20 +349,19 @@ func init() {
 			}
 
 			var hasJoinBtn bool
-			chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+			s.Browser.Evaluate(`
 				(function() {
 					let btns = Array.from(document.querySelectorAll('button, div[role="button"], span'));
 					return btns.some(b => b.innerText && (b.innerText.toLowerCase().includes('join now') || b.innerText.toLowerCase().includes('ask to join') || b.innerText.toLowerCase().includes('join anyway')) && b.offsetWidth > 0 && b.offsetHeight > 0);
 				})();
-			`, &hasJoinBtn))
+			`, &hasJoinBtn)
 			return hasJoinBtn
 		},
 		Work: func(s *StateContext) error {
-			deadline := time.Now().Add(15 * time.Second)
+			deadline := s.Clock.Now().Add(15 * time.Second)
 			var res string
-			for time.Now().Before(deadline) {
-				err := chromedp.Run(s.TargetCtx,
-					chromedp.Evaluate(`
+			for s.Clock.Now().Before(deadline) {
+				err := s.Browser.Evaluate(`
 						(function() {
 							let btns = Array.from(document.querySelectorAll('button, div[role="button"], span'));
 							let joinBtn = btns.find(b => b.innerText && (b.innerText.toLowerCase().includes('join now') || b.innerText.toLowerCase().includes('ask to join') || b.innerText.toLowerCase().includes('join anyway')) && b.offsetWidth > 0 && b.offsetHeight > 0);
@@ -385,26 +375,21 @@ func init() {
 							}
 							return "not found";
 						})();
-					`, &res),
-				)
+					`, &res)
 				if err == nil && res == "found" {
 					break
 				}
-				time.Sleep(1 * time.Second)
+				s.Clock.Sleep(1 * time.Second)
 			}
 
 			if res != "found" {
 				return fmt.Errorf("join button not found or enabled in time, last state: %s", res)
 			}
 
-			err := chromedp.Run(s.TargetCtx,
-				chromedp.Click(`#bot-join-button`, chromedp.ByQuery),
-				chromedp.Sleep(3*time.Second),
-			)
-			if err != nil {
+			if err := s.Browser.Click(`#bot-join-button`, false); err != nil {
 				return fmt.Errorf("failed to click join button: %w", err)
 			}
-			return nil
+			return s.Browser.Sleep(3*time.Second)
 		},
 	}
 
@@ -421,7 +406,7 @@ func init() {
 			s.mu.Unlock()
 
 			var clicked bool
-			err := chromedp.Run(s.TargetCtx, chromedp.Evaluate(`
+			err := s.Browser.Evaluate(`
 				(function() {
 					let btn = document.querySelector('button[aria-label*="leave" i], button[aria-label*="hang" i]');
 					if (btn) {
@@ -430,7 +415,7 @@ func init() {
 					}
 					return false;
 				})();
-			`, &clicked))
+			`, &clicked)
 
 			if err != nil {
 				return fmt.Errorf("failed to click leave button: %w", err)
@@ -440,7 +425,7 @@ func init() {
 				return fmt.Errorf("leave button not found")
 			}
 
-			time.Sleep(2 * time.Second)
+			s.Clock.Sleep(2 * time.Second)
 			return nil
 		},
 	}
