@@ -10,6 +10,7 @@ import QRCode from 'qrcode';
 import './virtual-keyboard.js';
 import { KeyPressedEvent } from './virtual-keyboard.js';
 import { wsClient } from '../ws-client.js';
+import { getAppClock } from '../clock-provider.js';
 
 const SETUP_STEPS = [
   { phase: 1, text: 'Init Server' },
@@ -314,7 +315,7 @@ export class SetupDisplay extends LitElement {
     super.connectedCallback();
     
     // Trigger the M3 transition to reveal the checklist shortly after load
-    setTimeout(() => {
+    getAppClock().setTimeout(async () => {
       this.showChecklist = true;
     }, 1200);
 
@@ -430,6 +431,22 @@ export class SetupDisplay extends LitElement {
     }
   }
 
+  private async handleTokenSubmit() {
+    if (!this.shadowRoot) return;
+    const input = this.shadowRoot.querySelector('#token-input') as HTMLInputElement;
+    if (!input || !input.value) return;
+
+    const token = input.value;
+    const res = await WrapPromise(wsClient.request({ type: 'submit_token', payload: { code: token } }), 'Failed to post token');
+
+    if (res.ok && res.safeUnwrap().status === 'ok') {
+      input.value = '';
+      this.statusPageText = 'Token submitted, processing...';
+    } else {
+      alert('Failed to submit token');
+    }
+  }
+
   private async handlePasswordSubmit() {
     if (!this.shadowRoot) return;
     const input = this.shadowRoot.querySelector('#google-password-input') as HTMLInputElement;
@@ -456,16 +473,34 @@ export class SetupDisplay extends LitElement {
     return true;
   }
 
+  private countdownTimer?: number;
+
   private startCountdown() {
     this.countdown = 15;
-    const interval = setInterval(() => {
-      this.countdown--;
-      this.statusPageText = `Setup was successfull refreshing in ${this.countdown}`;
-      if (this.countdown <= 0) {
-        clearInterval(interval);
-        window.location.reload();
-      }
-    }, 1000);
+    const scheduleCountdown = () => {
+      this.countdownTimer = getAppClock().setTimeout(async () => {
+        this.countdown--;
+        this.statusPageText = `Setup was successfull refreshing in ${this.countdown}`;
+        if (this.countdown <= 0) {
+          this.reloadPage();
+        } else {
+          scheduleCountdown();
+        }
+      }, 1000);
+    };
+    scheduleCountdown();
+  }
+
+  // Exposed for testing
+  protected reloadPage() {
+    window.location.reload();
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this.countdownTimer) {
+      getAppClock().clearTimeout(this.countdownTimer);
+    }
   }
 
   render() {

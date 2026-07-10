@@ -6,6 +6,7 @@ import './bottom-bar.js';
 import splashImg from '../../splash.png';
 import { parse, isWithinInterval, format, addSeconds, parseISO } from 'date-fns';
 import { wsClient } from '../ws-client.js';
+import { getAppClock } from '../clock-provider.js';
 
 interface EventInfo {
   name: string;
@@ -181,14 +182,14 @@ export class LoungeDisplay extends LitElement {
   @state() private serverState: Record<string, any> = {};
   @state() private meetingState = { microphone: false, camera: false, hand: false, in_meeting: false };
 
-  @state() private currentTime = new Date();
+  @state() private currentTime = new Date(getAppClock().now());
   @state() private meetings: Meeting[] = [];
   @state() private optimisticLoadingCode: string | null = null;
   private optimisticLoadingTimeout: number | null = null;
 
-  private timer?: ReturnType<typeof setInterval>;
-  private fetchTimer?: ReturnType<typeof setInterval>;
-  private fetchTimeout?: ReturnType<typeof setTimeout>;
+  private timer?: number;
+  private fetchTimer?: number;
+  private fetchTimeout?: number;
 
   private async fetchCalendarEvents() {
     try {
@@ -228,22 +229,30 @@ export class LoungeDisplay extends LitElement {
     this.fetchCalendarEvents();
 
     // Top-of-minute syncing for fetch
-    const now = new Date();
+    const now = new Date(getAppClock().now());
     const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
 
-    this.fetchTimeout = setTimeout(() => {
+    this.fetchTimeout = getAppClock().setTimeout(async () => {
       this.fetchCalendarEvents();
-      this.fetchTimer = setInterval(() => {
-        this.fetchCalendarEvents();
-      }, 60000);
+      // Use repeated timeouts instead of setInterval for clock abstraction compatibility
+      const scheduleNext = () => {
+        this.fetchTimer = getAppClock().setTimeout(async () => {
+          this.fetchCalendarEvents();
+          scheduleNext();
+        }, 60000);
+      };
+      scheduleNext();
     }, msUntilNextMinute);
 
-    this.timer = setInterval(() => {
-      this.currentTime = new Date();
-      this.updateMeetings();
-      this.pollMeetingState();
-    }, 1000);
-
+    const scheduleTimer = () => {
+      this.timer = getAppClock().setTimeout(async () => {
+        this.currentTime = new Date(getAppClock().now());
+        this.updateMeetings();
+        this.pollMeetingState();
+        scheduleTimer();
+      }, 1000);
+    };
+    scheduleTimer();
     wsClient.onStateUpdate((state) => {
       this.serverState = state;
     });
@@ -277,7 +286,7 @@ export class LoungeDisplay extends LitElement {
   private clearOptimisticLoading() {
     this.optimisticLoadingCode = null;
     if (this.optimisticLoadingTimeout !== null) {
-      window.clearTimeout(this.optimisticLoadingTimeout);
+      getAppClock().clearTimeout(this.optimisticLoadingTimeout);
       this.optimisticLoadingTimeout = null;
     }
   }
@@ -288,7 +297,7 @@ export class LoungeDisplay extends LitElement {
 
     this.clearOptimisticLoading();
     this.optimisticLoadingCode = code;
-    this.optimisticLoadingTimeout = window.setTimeout(() => {
+    this.optimisticLoadingTimeout = getAppClock().setTimeout(async () => {
       this.clearOptimisticLoading();
     }, 30000);
 
@@ -302,19 +311,19 @@ export class LoungeDisplay extends LitElement {
   disconnectedCallback() {
     super.disconnectedCallback();
     if (this.timer) {
-      clearInterval(this.timer);
+      getAppClock().clearTimeout(this.timer);
     }
     if (this.fetchTimeout) {
-      clearTimeout(this.fetchTimeout);
+      getAppClock().clearTimeout(this.fetchTimeout);
     }
     if (this.fetchTimer) {
-      clearInterval(this.fetchTimer);
+      getAppClock().clearTimeout(this.fetchTimer);
     }
   }
 
   private updateMeetings() {
     let changed = false;
-    const now = new Date();
+    const now = new Date(getAppClock().now());
     const updated = this.meetings.map((m) => {
       const start = parse(m.time, 'h:mm a', now);
       const end = addSeconds(start, m.lengthInSeconds);
@@ -334,7 +343,7 @@ export class LoungeDisplay extends LitElement {
   render() {
     const headerTimeStr = `${format(this.currentTime, 'h:mm a')} • ${format(this.currentTime, 'E, MMM d')}`;
 
-    const now = new Date();
+    const now = new Date(getAppClock().now());
     let firstFutureOrActiveIndex = this.meetings.findIndex((m) => {
       const start = parse(m.time, 'h:mm a', now);
       const end = addSeconds(start, m.lengthInSeconds);

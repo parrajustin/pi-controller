@@ -1,13 +1,20 @@
+import { getAppClock } from './clock-provider.js';
+
 export class WSClient {
   private ws: WebSocket | null = null;
-  private url: string;
+  public readonly url: string;
   private requestMap = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void }>();
   private reqId = 0;
   private listeners = new Set<(state: any) => void>();
 
-  constructor() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.url = `${protocol}//${window.location.host}/ws`;
+  constructor(url?: string) {
+    if (url) {
+      this.url = url;
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host || 'localhost';
+      this.url = `${protocol}//${host}/ws`;
+    }
     this.connect();
   }
 
@@ -41,7 +48,7 @@ export class WSClient {
 
     this.ws.onclose = () => {
       console.log('WS Disconnected. Reconnecting in .5s...');
-      setTimeout(() => this.connect(), 500);
+      getAppClock().setTimeout(async () => { this.connect(); }, 500);
     };
   }
 

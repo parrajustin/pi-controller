@@ -4,6 +4,12 @@
   "description": "Outer frame for lounge display",
   "main": "index.js",
   "scripts": {
+    "test": "npm run test:unit && npm run test:visual",
+    "test:unit": "jest",
+    "test:update": "jest -u",
+    "test:visual": "playwright test",
+    "test:visual:update": "playwright test --update-snapshots",
+    "test:visual:report": "playwright show-report",
     "build": "esbuild src/app.ts --bundle --outfile=dist/bundle.js --loader:.png=file --public-path=dist",
     "build-prod": "esbuild src/app.ts --bundle --outfile=dist/bundle.js --loader:.png=file --public-path=dist --define:MEETING_URL=\"'http://localhost:8080/meeting_control_web'\"",
     "watch": "esbuild src/app.ts --bundle --outfile=dist/bundle.js --watch --loader:.png=file --public-path=dist",
@@ -20,17 +26,26 @@
     "standard-ts-lib": "file:../../../../standard-ts-lib"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/jest": "^30.0.0",
     "@types/qrcode": "^1.5.6",
     "@typescript-eslint/eslint-plugin": "8.62.1",
     "@typescript-eslint/parser": "8.62.1",
     "concurrently": "10.0.3",
+    "element-internals-polyfill": "^3.0.2",
     "esbuild": "0.28.1",
     "eslint": "10.6.0",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-prettier": "5.5.6",
     "gts": "7.0.0",
+    "http-server": "^14.1.1",
+    "jest": "^30.4.2",
+    "jest-environment-jsdom": "^30.4.1",
+    "jest-websocket-mock": "^2.5.0",
     "live-server": "1.2.2",
+    "mock-socket": "^9.3.1",
     "prettier": "3.9.4",
+    "ts-jest": "^29.4.11",
     "typescript": "6.0.3"
   }
 }

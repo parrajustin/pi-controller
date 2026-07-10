@@ -4,11 +4,17 @@ import '@material/web/icon/icon.js';
 import '@material/web/iconbutton/icon-button.js';
 import '@material/web/divider/divider.js';
 import './lounge-display.js';
+import { wsClient } from '../ws-client.js';
 
 @customElement('display-controller')
 export class DisplayController extends LitElement {
   @state()
   private isOpen = false;
+
+  @state()
+  private serverState: Record<string, any> = {};
+
+  private unsubscribe?: () => void;
 
   static styles = css`
     :host {
@@ -32,6 +38,10 @@ export class DisplayController extends LitElement {
       transition: width 0.3s ease, background-color 0.3s ease;
       width: 5px;
       z-index: 5;
+    }
+
+    .sidebar.hidden {
+      display: none;
     }
 
     .sidebar.open {
@@ -142,14 +152,35 @@ export class DisplayController extends LitElement {
     }
   `;
 
+  connectedCallback() {
+    super.connectedCallback();
+    this.unsubscribe = wsClient.onStateUpdate((state) => {
+      this.serverState = state;
+      // Close sidebar if entering a meeting or loading state
+      const isInMeetingOrLoading = !!this.serverState.meeting_code && this.serverState.meeting_code !== 'landing';
+      if (isInMeetingOrLoading && this.isOpen) {
+        this.isOpen = false;
+      }
+    });
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    if (this.unsubscribe) {
+      this.unsubscribe();
+    }
+  }
+
   private toggleSidebar() {
     this.isOpen = !this.isOpen;
   }
 
   render() {
+    const isInMeetingOrLoading = !!this.serverState.meeting_code && this.serverState.meeting_code !== 'landing';
+    
     return html`
       <div class="container">
-        <div class="sidebar ${this.isOpen ? 'open' : ''}">
+        <div class="sidebar ${this.isOpen ? 'open' : ''} ${isInMeetingOrLoading ? 'hidden' : ''}">
           <button class="toggle-btn" @click=${this.toggleSidebar}>
             <md-icon>${this.isOpen ? 'chevron_left' : 'chevron_right'}</md-icon>
           </button>

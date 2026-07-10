@@ -3,6 +3,7 @@ import { customElement, state, query, property } from 'lit/decorators.js';
 import './icon-button.js';
 import './virtual-keyboard.js';
 import { KeyPressedEvent } from './virtual-keyboard.js';
+import { getAppClock } from '../clock-provider.js';
 
 @customElement('bottom-bar')
 export class BottomBar extends LitElement {
@@ -168,7 +169,7 @@ export class BottomBar extends LitElement {
   private handleFocus() {
     this.showKeyboard = true;
     // Auto focus the overlay input when it opens
-    setTimeout(() => {
+    getAppClock().setTimeout(async () => {
       this.overlayInput?.focus();
     }, 50);
   }

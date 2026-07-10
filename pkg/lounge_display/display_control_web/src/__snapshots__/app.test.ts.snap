@@ -1,0 +1,15 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`Display Control App Integration navigates from setup to landing page to meeting and back: 1 - Initial Setup View 1`] = `"<display-control-app></display-control-app>"`;
+
+exports[`Display Control App Integration navigates from setup to landing page to meeting and back: 2 - Setup Init Server View 1`] = `"<display-control-app></display-control-app>"`;
+
+exports[`Display Control App Integration navigates from setup to landing page to meeting and back: 3 - Lounge Display Empty 1`] = `"<display-control-app></display-control-app>"`;
+
+exports[`Display Control App Integration navigates from setup to landing page to meeting and back: 4 - Lounge Display with Meetings 1`] = `"<display-control-app></display-control-app>"`;
+
+exports[`Display Control App Integration navigates from setup to landing page to meeting and back: 5 - Lounge Display Meeting Active 1`] = `"<display-control-app></display-control-app>"`;
+
+exports[`Display Control App Integration navigates from setup to landing page to meeting and back: 6 - In Meeting View 1`] = `"<display-control-app></display-control-app>"`;
+
+exports[`Display Control App Integration navigates from setup to landing page to meeting and back: 7 - Back to Landing Page 1`] = `"<display-control-app></display-control-app>"`;

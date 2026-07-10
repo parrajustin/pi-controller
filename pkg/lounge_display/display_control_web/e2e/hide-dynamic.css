@@ -1,0 +1,5 @@
+md-linear-progress {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
