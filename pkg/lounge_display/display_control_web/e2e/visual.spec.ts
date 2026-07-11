@@ -220,6 +220,17 @@ test.describe('Lounge Display Visual Regression', () => {
     await page.clock.fastForward(500); // Wait for transition
     await expect(page).toHaveScreenshot('11b-in-meeting-sidebar-open.png');
 
+    // Click Refresh button to open the restart menu
+    await page.getByText('Refresh', { exact: true }).click({ force: true });
+    await page.clock.fastForward(500);
+    
+    // Check that the dialog is open and looks correct
+    await expect(page).toHaveScreenshot('12-restart-options-dialog.png');
+    
+    // Close the restart dialog
+    await page.getByText('Refresh', { exact: true }).click({ force: true });
+    await page.clock.fastForward(500);
+
     // Close sidebar
     await page.locator('.toggle-btn').click();
     await page.clock.fastForward(500);

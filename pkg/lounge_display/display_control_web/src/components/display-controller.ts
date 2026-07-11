@@ -3,6 +3,7 @@ import { customElement, state } from 'lit/decorators.js';
 import '@material/web/icon/icon.js';
 import '@material/web/iconbutton/icon-button.js';
 import '@material/web/divider/divider.js';
+import '@material/web/button/filled-button.js';
 import './lounge-display.js';
 import './setup-display.js';
 import { wsClient } from '../ws-client.js';
@@ -18,6 +19,9 @@ export class DisplayController extends LitElement {
 
   @state()
   private setupCompleted = false;
+
+  @state()
+  private showRestartOptions = false;
 
   private unsubscribe?: () => void;
 
@@ -160,6 +164,30 @@ export class DisplayController extends LitElement {
       display: flex;
       margin-left: 5px; /* Offset the 5px sidebar closed width */
     }
+
+    .restart-dialog {
+      position: absolute;
+      top: 0;
+      left: 250px;
+      bottom: 0;
+      right: 0;
+      background-color: rgba(32, 33, 36, 0.95);
+      z-index: 4;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      color: var(--text-primary, #e8eaed);
+    }
+    
+    .restart-dialog h2 {
+      margin-bottom: 24px;
+    }
+
+    .restart-dialog md-filled-button {
+      width: 250px;
+    }
   `;
 
   async connectedCallback() {
@@ -195,6 +223,23 @@ export class DisplayController extends LitElement {
 
   private toggleSidebar() {
     this.isOpen = !this.isOpen;
+    if (!this.isOpen) {
+      this.showRestartOptions = false;
+    }
+  }
+
+  private toggleRestartOptions() {
+    this.showRestartOptions = !this.showRestartOptions;
+  }
+
+  private async restartDisplay() {
+    const res = await WrapPromise(
+      fetch('http://localhost:6060/reboot', { method: 'POST' }),
+      'Failed to send reboot command'
+    );
+    if (!res.ok) {
+      console.error('Reboot failed:', res.val);
+    }
   }
 
   render() {
@@ -219,6 +264,10 @@ export class DisplayController extends LitElement {
                   <md-icon>bug_report</md-icon>
                   <span class="nav-label">Test</span>
                 </div>
+                <div class="nav-item" @click=${this.toggleRestartOptions}>
+                  <md-icon>restart_alt</md-icon>
+                  <span class="nav-label">Refresh</span>
+                </div>
               </div>
             </div>
           </div>
@@ -230,6 +279,15 @@ export class DisplayController extends LitElement {
             <setup-display style="flex-grow: 1;"></setup-display>
           `}
         </div>
+        ${this.showRestartOptions ? html`
+          <div class="restart-dialog">
+            <h2>Restart Options</h2>
+            <md-filled-button @click=${this.restartDisplay}>Restart Display</md-filled-button>
+            <md-filled-button>Refresh Display Page</md-filled-button>
+            <md-filled-button>Refresh Main Screen</md-filled-button>
+            <md-filled-button>Restart Kiosk</md-filled-button>
+          </div>
+        ` : ''}
       </div>
     `;
   }

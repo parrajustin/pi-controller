@@ -46,4 +46,45 @@ describe('DisplayController', () => {
     expect(sidebar.classList.contains('open')).toBe(false);
   });
 
+  it('opens restart options and triggers reboot api when Restart Display is clicked', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({})
+    }) as any;
+
+    const el = document.createElement('display-controller') as DisplayController;
+    document.body.appendChild(el);
+    await el.updateComplete;
+    
+    // Open sidebar
+    const btn = el.shadowRoot!.querySelector('.toggle-btn') as HTMLElement;
+    btn.click();
+    await el.updateComplete;
+
+    // Click Refresh button
+    const refreshBtn = Array.from(el.shadowRoot!.querySelectorAll('.nav-item'))
+      .find(n => n.textContent?.includes('Refresh')) as HTMLElement;
+    expect(refreshBtn).toBeDefined();
+    
+    refreshBtn.click();
+    await el.updateComplete;
+
+    // Verify dialog appears
+    const dialog = el.shadowRoot!.querySelector('.restart-dialog');
+    expect(dialog).toBeDefined();
+
+    // Click Restart Display
+    const restartBtn = Array.from(dialog!.querySelectorAll('md-filled-button'))
+      .find(b => b.textContent?.includes('Restart Display')) as HTMLElement;
+    expect(restartBtn).toBeDefined();
+
+    restartBtn.click();
+    await el.updateComplete;
+
+    // Verify fetch was called
+    expect(global.fetch).toHaveBeenCalledWith('http://localhost:6060/reboot', expect.objectContaining({
+      method: 'POST'
+    }));
+  });
+
 });
