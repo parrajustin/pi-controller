@@ -10,13 +10,6 @@ receivers:
             - "*"
           allowed_headers:
             - "*"
-  prometheus:
-    config:
-      scrape_configs:
-        - job_name: 'node_exporter'
-          scrape_interval: 15s
-          static_configs:
-            - targets: ['node_exporter:9100']
 
 exporters:
   otlp/lgtm:
@@ -40,7 +33,7 @@ service:
       processors: [batch]
       exporters: [otlp/lgtm, debug]
     metrics:
-      receivers: [otlp, prometheus]
+      receivers: [otlp]
       processors: [batch]
       exporters: [otlp/lgtm, debug]
     logs:

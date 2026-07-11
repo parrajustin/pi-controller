@@ -61,21 +61,6 @@ services:
       - ./lgtm/loki-config.yaml:/otel-lgtm/loki-config.yaml:ro
       - ./lgtm/tempo-config.yaml:/otel-lgtm/tempo-config.yaml:ro
 
-  node_exporter:
-    image: prom/node-exporter:latest
-    container_name: node_exporter
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.rootfs=/rootfs'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
-    ports:
-      - "9100:9100"
-
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel-collector
@@ -86,4 +71,3 @@ services:
       - "4318:4318"   # OTLP http for frontend telemetry
     depends_on:
       - lgtm
-      - node_exporter
