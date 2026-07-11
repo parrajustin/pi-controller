@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"time"
@@ -111,10 +113,42 @@ func startDockerCompose() {
 		slog.Info("Successfully started docker compose services.")
 	}
 }
+func handleReboot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	slog.Info("Reboot API called, issuing reboot command...")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Rebooting system..."))
+
+	// Delay the reboot slightly to allow the HTTP response to be sent
+	go func() {
+		time.Sleep(1 * time.Second)
+		cmd := exec.Command("sudo", "reboot")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			slog.Error(fmt.Sprintf("Failed to reboot: %v", err))
+		}
+	}()
+}
 
 func main() {
 	logger.Init("pi-controller")
 	slog.Info("Starting pi-controller...")
+
+	shutdown, err := InitTelemetry(context.Background())
+	if err != nil {
+		slog.Error("Failed to initialize telemetry", "error", err)
+	} else {
+		defer func() {
+			if err := shutdown(context.Background()); err != nil {
+				slog.Error("Failed to shutdown telemetry", "error", err)
+			}
+		}()
+	}
 
 	if _, err := os.Stat(publicKeyFile); os.IsNotExist(err) {
 		logger.Fatalf("Fatal: %s is missing from the directory", publicKeyFile)
@@ -127,6 +161,14 @@ func main() {
 	stopContainers()
 
 	startDockerCompose()
+
+	http.HandleFunc("/reboot", handleReboot)
+	go func() {
+		slog.Info("Starting API server on :8080")
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			slog.Error(fmt.Sprintf("API server failed: %v", err))
+		}
+	}()
 
 	// Main application loop
 	// For now, it just simulates the pi-controller running
