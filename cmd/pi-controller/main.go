@@ -164,8 +164,8 @@ func main() {
 
 	http.HandleFunc("/reboot", handleReboot)
 	go func() {
-		slog.Info("Starting API server on :8080")
-		if err := http.ListenAndServe(":8080", nil); err != nil {
+		slog.Info("Starting API server on :6060")
+		if err := http.ListenAndServe(":6060", nil); err != nil {
 			slog.Error(fmt.Sprintf("API server failed: %v", err))
 		}
 	}()
