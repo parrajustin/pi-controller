@@ -116,7 +116,7 @@ describe('Display Control App Integration', () => {
   });
 
   it('handles fetch error gracefully', async () => {
-    (global.fetch as jest.Mock).mockRejectedValueOnce(new Error('Network error'));
+    global.fetch = jest.fn().mockRejectedValueOnce(new Error('Network error'));
     
     const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     

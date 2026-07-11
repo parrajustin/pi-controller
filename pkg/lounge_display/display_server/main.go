@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -14,9 +16,31 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/gorilla/websocket"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/display_server/setup"
 )
+
+var (
+	wsConnectionsActive metric.Int64UpDownCounter
+	wsRequestCount      metric.Int64Counter
+)
+
+func init() {
+	meter := otel.Meter("display_server")
+	var err error
+	wsConnectionsActive, err = meter.Int64UpDownCounter("websocket.connections.active", metric.WithDescription("Active websocket connections"))
+	if err != nil { panic(err) }
+
+	wsRequestCount, err = meter.Int64Counter("websocket.request.count", metric.WithDescription("Count of websocket method calls"))
+	if err != nil { panic(err) }
+}
 
 // applyHeaders adds headers to fix CORS and CSP (Content Security Policy) issues.
 // This resolves common "CSF" (CORS/CSP) errors when serving local HTML data.
@@ -47,7 +71,7 @@ func loggingMiddleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/auth/") {
 			if r.URL.Path == "/api/password" || strings.Contains(r.URL.Path, "password") {
-				log.Printf("[API] %s %s (body hidden)\n", r.Method, r.URL.Path)
+				slog.Info("[API]", "method", r.Method, "path", r.URL.Path, "info", "body hidden")
 			} else {
 				var bodyBytes []byte
 				if r.Body != nil {
@@ -57,9 +81,9 @@ func loggingMiddleware(h http.Handler) http.Handler {
 				params := r.URL.Query().Encode()
 				bodyStr := string(bodyBytes)
 				if bodyStr != "" || params != "" {
-					log.Printf("[API] %s %s | query: %s | body: %s\n", r.Method, r.URL.Path, params, bodyStr)
+					slog.Info("[API]", "method", r.Method, "path", r.URL.Path, "query", params, "body", bodyStr)
 				} else {
-					log.Printf("[API] %s %s\n", r.Method, r.URL.Path)
+					slog.Info("[API]", "method", r.Method, "path", r.URL.Path)
 				}
 			}
 		}
@@ -94,6 +118,12 @@ func getLocalIP() string {
 }
 
 func main() {
+	shutdown, err := InitTelemetry(context.Background())
+	if err != nil {
+		log.Fatalf("failed to init telemetry: %v", err)
+	}
+	defer shutdown(context.Background())
+
 	dirFlag := flag.String("dir", ".", "the directory to serve")
 	portFlag := flag.String("port", "8080", "the port to listen on")
 	receiverFlag := flag.String("receiver", "", "path to oauth receiver binary (optional)")
@@ -136,25 +166,29 @@ func main() {
 
 	// Start the server in a goroutine
 	go func() {
-		fmt.Printf("Serving directory %s on http://localhost:%s\n", dir, *portFlag)
+		slog.Info("Serving directory", "dir", dir, "port", *portFlag)
 		fs := http.FileServer(http.Dir(dir))
 		mux.Handle("/", fs)
 		handler := applyHeaders(mux)
 		handler = loggingMiddleware(handler)
-		if err := http.ListenAndServe(":"+*portFlag, handler); err != nil {
+		otelHandler := otelhttp.NewHandler(handler, "display_server")
+		if err := http.ListenAndServe(":"+*portFlag, otelHandler); err != nil {
 			log.Fatal(err)
 		}
 	}()
 
-	fmt.Println("Starting application APIs...")
+	slog.Info("Starting application APIs...")
 
 	// Register WebSocket endpoint
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			log.Printf("WS Upgrade error: %v", err)
+			slog.Error("WS Upgrade error", "error", err)
 			return
 		}
+		
+		wsConnectionsActive.Add(context.Background(), 1)
+		defer wsConnectionsActive.Add(context.Background(), -1)
 		
 		stateCtx.AddWSConn(conn)
 		defer stateCtx.RemoveWSConn(conn)
@@ -166,20 +200,36 @@ func main() {
 			_, msgBytes, err := conn.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Printf("WS Read error: %v", err)
+					slog.Error("WS Read error", "error", err)
 				}
 				break
 			}
 
 			var req struct {
-				ID      string          `json:"id"`
-				Type    string          `json:"type"`
-				Payload json.RawMessage `json:"payload"`
+				ID          string          `json:"id"`
+				Type        string          `json:"type"`
+				Payload     json.RawMessage `json:"payload"`
+				Traceparent string          `json:"traceparent,omitempty"`
+				Tracestate  string          `json:"tracestate,omitempty"`
 			}
 			if err := json.Unmarshal(msgBytes, &req); err != nil {
-				log.Printf("WS decode error: %v", err)
+				slog.Error("WS decode error", "error", err)
 				continue
 			}
+
+			carrier := propagation.MapCarrier{
+				"traceparent": req.Traceparent,
+				"tracestate":  req.Tracestate,
+			}
+			ctx := otel.GetTextMapPropagator().Extract(context.Background(), carrier)
+			ctx, span := otel.Tracer("display_server").Start(ctx, "websocket.process."+req.Type, trace.WithSpanKind(trace.SpanKindServer))
+
+			clientIP := r.RemoteAddr
+			if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+				clientIP = host
+			}
+
+			slog.Info("Received WS message", "type", req.Type, "id", req.ID)
 
 			var resPayload interface{}
 			var resErr error
@@ -187,7 +237,6 @@ func main() {
 			// Global WS handlers
 			switch req.Type {
 			case "get_state":
-				log.Printf("[WS] Received message %q (ID: %s) -> Routing to Global handler", req.Type, req.ID)
 				resPayload = map[string]interface{}{
 					"current_node": stateCtx.GetNodeName(),
 					"meeting_code": stateCtx.MeetingCode,
@@ -196,21 +245,18 @@ func main() {
 					"setup_phase":  stateCtx.GetSetupPhase(),
 				}
 			case "get_ip":
-				log.Printf("[WS] Received message %q (ID: %s) -> Routing to Global handler", req.Type, req.ID)
 				ip := os.Getenv("HOST_IP")
 				if ip == "" {
 					ip = getLocalIP()
 				}
 				resPayload = map[string]string{"ip": ip}
 			case "get_status":
-				log.Printf("[WS] Received message %q (ID: %s) -> Routing to Global handler", req.Type, req.ID)
 				status := "pending"
 				if stateCtx.GetSetupReady() {
 					status = "ready"
 				}
 				resPayload = map[string]string{"status": status}
 			case "calendar_events":
-				log.Printf("[WS] Received message %q (ID: %s) -> Routing to Global handler", req.Type, req.ID)
 				if stateCtx.CalendarClient != nil {
 					events, err := stateCtx.CalendarClient.FetchEvents()
 					if err != nil {
@@ -226,10 +272,9 @@ func main() {
 				handler, ok := stateCtx.GetWSHandler(req.Type)
 
 				if ok {
-					log.Printf("[WS] Received message %q (ID: %s) -> Routing to Node handler", req.Type, req.ID)
 					resPayload, resErr = handler(req.Payload)
 				} else {
-					log.Printf("[WS] Received message %q (ID: %s) -> ERROR: Unknown handler", req.Type, req.ID)
+					slog.Error("Unknown WS handler", "type", req.Type, "id", req.ID)
 					resErr = fmt.Errorf("unknown message type: %s", req.Type)
 				}
 			}
@@ -247,6 +292,17 @@ func main() {
 				}
 				conn.WriteJSON(res)
 			}
+			
+			statusAttr := "success"
+			if resErr != nil {
+				statusAttr = "error"
+			}
+			wsRequestCount.Add(context.Background(), 1, metric.WithAttributes(
+				attribute.String("client_ip", clientIP),
+				attribute.String("type", req.Type),
+				attribute.String("status", statusAttr),
+			))
+			span.End()
 		}
 	})
 

@@ -2,7 +2,7 @@ package setup
 
 import (
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -17,7 +17,7 @@ func InitNodes() *Node {
 		PreCheck: func(s *StateContext) bool { return true },
 		Setup: func(s *StateContext) error {
 			s.DefaultNode = InitServerNode
-			fmt.Printf("Server initializing on port %s\n", s.PortFlag)
+			slog.Info("Server initializing", "port", s.PortFlag)
 			return nil
 		},
 	}

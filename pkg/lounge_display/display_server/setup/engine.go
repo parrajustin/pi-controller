@@ -4,18 +4,42 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 
 	"github.com/gorilla/websocket"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/browser"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/calendarclient"
 )
+
+var (
+	nodeWorkDuration  metric.Float64Histogram
+	nodePhaseDuration metric.Float64Histogram
+	nodeVisits        metric.Int64Counter
+	nodeRestIdleTime  metric.Float64Histogram
+)
+
+func init() {
+	meter := otel.Meter("display_server/setup")
+	var err error
+	nodeWorkDuration, err = meter.Float64Histogram("node.work.duration", metric.WithDescription("Execution time of work phase in ms"), metric.WithUnit("ms"))
+	if err != nil { panic(err) }
+	nodePhaseDuration, err = meter.Float64Histogram("node.phase.duration", metric.WithDescription("Execution time of different phases"), metric.WithUnit("ms"))
+	if err != nil { panic(err) }
+	nodeVisits, err = meter.Int64Counter("node.visits", metric.WithDescription("Frequency of specific states"))
+	if err != nil { panic(err) }
+	nodeRestIdleTime, err = meter.Float64Histogram("node.rest.idle_time", metric.WithDescription("Idle time in rest nodes"), metric.WithUnit("s"))
+	if err != nil { panic(err) }
+}
 
 type StateContext struct {
 	mu          sync.Mutex
@@ -121,7 +145,7 @@ func (s *StateContext) BroadcastState() {
 	for conn := range s.WSConns {
 		err := conn.WriteJSON(msg)
 		if err != nil {
-			log.Printf("Error broadcasting to WS: %v", err)
+			slog.Error("Error broadcasting to WS", "error", err)
 			conn.Close()
 			delete(s.WSConns, conn)
 		}
@@ -215,14 +239,14 @@ func captureDebugArtifacts(s *StateContext, stepName, phase, prefix string) {
 	if s.Browser == nil {
 		return
 	}
-	fmt.Printf("Capturing artifacts for %s (%s)...\n", stepName, phase)
+	slog.Info("Capturing artifacts", "step", stepName, "phase", phase)
 	var html string
 	var screenshotBuf []byte
 
 	errHTML := s.Browser.OuterHTML("html", &html)
 	errImg := s.Browser.CaptureScreenshot(&screenshotBuf)
 	if errHTML != nil || errImg != nil {
-		log.Printf("Warning: Failed to capture artifacts for %s: %v %v\n", stepName, errHTML, errImg)
+		slog.Warn("Failed to capture artifacts", "step", stepName, "errHTML", errHTML, "errImg", errImg)
 		return
 	}
 
@@ -231,7 +255,7 @@ func captureDebugArtifacts(s *StateContext, stepName, phase, prefix string) {
 		logsDir = "logs"
 	}
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
-		log.Printf("Warning: Failed to create logs dir: %v\n", err)
+		slog.Warn("Failed to create logs dir", "error", err)
 	}
 
 	htmlFile := fmt.Sprintf("%s/%04d_%s%s_%s_dump.html", logsDir, s.StepCounter, prefix, stepName, phase)
@@ -239,7 +263,7 @@ func captureDebugArtifacts(s *StateContext, stepName, phase, prefix string) {
 
 	os.WriteFile(htmlFile, []byte(html), 0644)
 	os.WriteFile(imgFile, screenshotBuf, 0644)
-	fmt.Printf("Saved %s and %s\n", htmlFile, imgFile)
+	slog.Info("Saved artifacts", "html", htmlFile, "img", imgFile)
 }
 
 func RunEngine(startNode *Node, s *StateContext) {
@@ -252,8 +276,11 @@ func RunEngine(startNode *Node, s *StateContext) {
 	}
 	for {
 		s.StepCounter++
-		fmt.Printf("\n=== Executing Node %04d: %s ===\n", s.StepCounter, currentNode.Name)
+		slog.Info("Executing Node", "step", s.StepCounter, "node", currentNode.Name)
 		s.SetNodeName(currentNode.Name)
+		
+		nodeVisits.Add(context.Background(), 1, metric.WithAttributes(attribute.String("node_name", currentNode.Name)))
+		nodeStartTime := time.Now()
 
 		// If we reach a state where the display is ready to show meeting controls, set SetupReady to true
 		if currentNode.Name == "Meet Landing Page" ||
@@ -267,9 +294,11 @@ func RunEngine(startNode *Node, s *StateContext) {
 		s.SetPhase("pre-setup")
 		if currentNode.Setup != nil {
 			s.SetPhase("setup")
+			start := time.Now()
 			err := currentNode.Setup(s)
+			nodePhaseDuration.Record(context.Background(), float64(time.Since(start).Milliseconds()), metric.WithAttributes(attribute.String("node_name", currentNode.Name), attribute.String("phase", "setup")))
 			if err != nil {
-				log.Printf("Setup failed for node %s: %v\n", currentNode.Name, err)
+				slog.Error("Setup failed", "node", currentNode.Name, "error", err)
 			}
 		}
 
@@ -280,9 +309,13 @@ func RunEngine(startNode *Node, s *StateContext) {
 		s.SetPhase("pre-work")
 		if currentNode.Work != nil {
 			s.SetPhase("work")
+			start := time.Now()
 			err := currentNode.Work(s)
+			durationMs := float64(time.Since(start).Milliseconds())
+			nodePhaseDuration.Record(context.Background(), durationMs, metric.WithAttributes(attribute.String("node_name", currentNode.Name), attribute.String("phase", "work")))
+			nodeWorkDuration.Record(context.Background(), durationMs, metric.WithAttributes(attribute.String("node_name", currentNode.Name)))
 			if err != nil {
-				log.Printf("Work failed for node %s: %v\n", currentNode.Name, err)
+				slog.Error("Work failed", "node", currentNode.Name, "error", err)
 				if currentNode == startNode {
 					s.Clock.Sleep(2 * time.Second)
 					continue
@@ -296,9 +329,11 @@ func RunEngine(startNode *Node, s *StateContext) {
 
 		s.SetPhase("done-check")
 		if currentNode.DoneCheck != nil {
+			start := time.Now()
 			err := currentNode.DoneCheck(s)
+			nodePhaseDuration.Record(context.Background(), float64(time.Since(start).Milliseconds()), metric.WithAttributes(attribute.String("node_name", currentNode.Name), attribute.String("phase", "done_check")))
 			if err != nil {
-				log.Printf("DoneCheck failed for node %s: %v\n", currentNode.Name, err)
+				slog.Error("DoneCheck failed", "node", currentNode.Name, "error", err)
 				currentNode = s.DefaultNode
 				continue
 			}
@@ -306,11 +341,11 @@ func RunEngine(startNode *Node, s *StateContext) {
 
 		s.SetPhase("transitioning")
 		if len(currentNode.Next) == 0 {
-			fmt.Println("\nFlow finished successfully at terminal node:", currentNode.Name)
+			slog.Info("Flow finished successfully at terminal node", "node", currentNode.Name)
 			return
 		}
 
-		fmt.Printf("Finding next node from %d possibilities...\n", len(currentNode.Next))
+		slog.Info("Finding next node", "possibilities", len(currentNode.Next))
 		var nextNode *Node
 
 		var timeout time.Duration
@@ -325,7 +360,7 @@ func RunEngine(startNode *Node, s *StateContext) {
 
 		for nextNode == nil {
 			if !currentNode.IsRestNode && s.Clock.Now().After(deadline) {
-				fmt.Printf("Non-rest node timeout reached (%v).\n", timeout)
+				slog.Warn("Non-rest node timeout reached", "timeout", timeout)
 				break
 			}
 
@@ -340,7 +375,7 @@ func RunEngine(startNode *Node, s *StateContext) {
 			}
 
 			if nextNode != nil {
-				log.Printf("Selected next node: %s\n", nextNode.Name)
+				slog.Info("Selected next node", "node", nextNode.Name)
 				break
 			}
 
@@ -348,13 +383,13 @@ func RunEngine(startNode *Node, s *StateContext) {
 			if currentNode.IsRestNode {
 				if currentNode.RestNodeValidation != nil {
 					if !currentNode.RestNodeValidation(s) {
-						fmt.Printf("Rest node %s condition is no longer valid. Transitioning to default node.\n", currentNode.Name)
+						slog.Info("Rest node condition no longer valid, transitioning to default node", "node", currentNode.Name)
 						nextNode = s.DefaultNode
 						break
 					}
 				} else if currentNode.PreCheck != nil {
 					if !currentNode.PreCheck(s) {
-						fmt.Printf("Rest node %s condition is no longer valid. Transitioning to default node.\n", currentNode.Name)
+						slog.Info("Rest node condition no longer valid, transitioning to default node", "node", currentNode.Name)
 						nextNode = s.DefaultNode
 						break
 					}
@@ -365,15 +400,21 @@ func RunEngine(startNode *Node, s *StateContext) {
 		}
 
 		if nextNode == nil {
-			fmt.Println("\nERROR: No valid next path found! Restarting flow.")
+			slog.Error("No valid next path found! Restarting flow.")
 			nextNode = s.DefaultNode
 		}
 
 		if currentNode.Teardown != nil {
+			start := time.Now()
 			err := currentNode.Teardown(s)
+			nodePhaseDuration.Record(context.Background(), float64(time.Since(start).Milliseconds()), metric.WithAttributes(attribute.String("node_name", currentNode.Name), attribute.String("phase", "teardown")))
 			if err != nil {
-				log.Printf("Teardown failed for node %s: %v\n", currentNode.Name, err)
+				slog.Error("Teardown failed", "node", currentNode.Name, "error", err)
 			}
+		}
+
+		if currentNode.IsRestNode {
+			nodeRestIdleTime.Record(context.Background(), time.Since(nodeStartTime).Seconds(), metric.WithAttributes(attribute.String("node_name", currentNode.Name)))
 		}
 
 		currentNode = nextNode

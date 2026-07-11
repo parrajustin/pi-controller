@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/url"
 	"os"
@@ -44,7 +44,7 @@ func init() {
 				cdpPort = "9222"
 			}
 			wsURL := fmt.Sprintf("ws://%s:%s", kioskIP, cdpPort)
-			fmt.Printf("Connecting to Chrome on %s...\n", wsURL)
+			slog.Info("Connecting to Chrome", "url", wsURL)
 
 			for {
 				allocCtx, _ := chromedp.NewRemoteAllocator(context.Background(), wsURL)
@@ -70,12 +70,12 @@ func init() {
 						// Check if connection works
 						var tmp string
 						if _, err := s.Browser.Location(); err == nil || tmp == "" { // Ignore error for init
-							fmt.Println("CDP Connected.")
+							slog.Info("CDP Connected.")
 							return nil
 						}
 					}
 				}
-				fmt.Println("Failed to connect to CDP or find target. Retrying in 5 seconds...")
+				slog.Warn("Failed to connect to CDP or find target. Retrying in 5 seconds...")
 				s.Clock.Sleep(5 * time.Second)
 			}
 		},
@@ -89,7 +89,7 @@ func init() {
 			return nil
 		},
 		Work: func(s *StateContext) error {
-			fmt.Println("Navigating to https://meet.google.com/landing")
+			slog.Info("Navigating to https://meet.google.com/landing")
 			if err := s.Browser.Navigate("https://meet.google.com/landing"); err != nil {
 				return err
 			}
@@ -140,7 +140,7 @@ func init() {
 		},
 		Work: func(s *StateContext) error {
 			urlStr, _ := s.Browser.Location()
-			log.Printf("Entered Meet Landing Page. Current URL: %s\n", urlStr)
+			slog.Info("Entered Meet Landing Page", "url", urlStr)
 			
 			s.mu.Lock()
 			s.MeetingCode = ""
@@ -279,7 +279,7 @@ func init() {
 		},
 		Work: func(s *StateContext) error {
 			urlStr, _ := s.Browser.Location()
-			log.Printf("Entered In Meeting. Current URL: %s\n", urlStr)
+			slog.Info("Entered In Meeting", "url", urlStr)
 			u, _ := url.Parse(urlStr)
 			if u != nil {
 				s.mu.Lock()
@@ -320,7 +320,7 @@ func init() {
 			}
 
 			meetURL := fmt.Sprintf("https://meet.google.com/%s", code)
-			fmt.Printf("Joining meeting: %s\n", meetURL)
+			slog.Info("Joining meeting", "url", meetURL)
 
 			if err := s.Browser.Navigate(meetURL); err != nil {
 				return fmt.Errorf("failed to navigate: %w", err)

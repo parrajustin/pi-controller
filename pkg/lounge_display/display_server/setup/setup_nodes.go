@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -49,7 +50,7 @@ func runReceiver(binPath string) (string, *exec.Cmd, error) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		fmt.Println("[receiver]", line)
+		slog.Info("[receiver]", "line", line)
 		if strings.HasPrefix(line, "Ticket: ") {
 			ticket = strings.TrimSpace(strings.TrimPrefix(line, "Ticket: "))
 			break
@@ -64,7 +65,7 @@ func runReceiver(binPath string) (string, *exec.Cmd, error) {
 		defer cmd.Wait()
 		for scanner.Scan() {
 			line := scanner.Text()
-			fmt.Println("[receiver]", line)
+			slog.Info("[receiver]", "line", line)
 			if strings.HasPrefix(line, "RECEIVED CODE: ") {
 				code := strings.TrimSpace(strings.TrimPrefix(line, "RECEIVED CODE: "))
 				authCodeChan <- code
@@ -133,13 +134,13 @@ func init() {
 			}
 
 			if needsCred {
-				fmt.Println("Waiting for credentials on POST /api/cred...")
+				slog.Info("Waiting for credentials on POST /api/cred...")
 				credBytes := <-credChan
 				err := os.WriteFile(credPath, credBytes, 0600)
 				if err != nil {
 					return err
 				}
-				fmt.Println("Saved credentials.json")
+				slog.Info("Saved credentials.json")
 			}
 			return nil
 		},
@@ -210,7 +211,7 @@ func init() {
 					oauth2.SetAuthURLParam("device_id", "lounge-display"),
 					oauth2.SetAuthURLParam("device_name", "Lounge Display"),
 				)
-				fmt.Println("Waiting for auth code on authCodeChan...")
+				slog.Info("Waiting for auth code on authCodeChan...")
 				authCode := <-authCodeChan
 				var err error
 				tok, err = config.Exchange(context.Background(), authCode)
@@ -246,11 +247,11 @@ func init() {
 				}
 				err := s.CalendarClient.TestConnection()
 				if err != nil {
-					fmt.Printf("Unable to retrieve calendar events: %v, retrying in 5 seconds...\n", err)
+					slog.Warn("Unable to retrieve calendar events, retrying in 5 seconds...", "error", err)
 					s.Clock.Sleep(5 * time.Second)
 					continue
 				}
-				fmt.Println("Calendar events fetched successfully!")
+				slog.Info("Calendar events fetched successfully!")
 				return nil
 			}
 		},
@@ -416,7 +417,7 @@ func init() {
 			return exists
 		},
 		Work: func(s *StateContext) error {
-			fmt.Println("Waiting for password on POST /api/password ...")
+			slog.Info("Waiting for password on POST /api/password ...")
 			password := <-s.PasswordChan
 			if err := s.Browser.SendKeys(`input[type="password"]`, password, false); err != nil { return err }
 			if err := s.Browser.Sleep(500*time.Millisecond); err != nil { return err }
@@ -440,7 +441,7 @@ func init() {
 			return errorText != ""
 		},
 		Work: func(s *StateContext) error {
-			fmt.Println("Wrong password entered, retrying...")
+			slog.Info("Wrong password entered, retrying...")
 			return nil
 		},
 	}
@@ -465,7 +466,7 @@ func init() {
 			return found
 		},
 		DoneCheck: func(s *StateContext) error {
-			fmt.Println("Polling for 2FA completion (up to 10 minutes)...")
+			slog.Info("Polling for 2FA completion (up to 10 minutes)...")
 			deadline := s.Clock.Now().Add(10 * time.Minute)
 			for s.Clock.Now().Before(deadline) {
 				urlStr, err := s.Browser.Location()

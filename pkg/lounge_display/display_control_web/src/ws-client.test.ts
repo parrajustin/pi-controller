@@ -45,7 +45,7 @@ describe('ws-client', () => {
     
     const result = await requestPromise;
     expect(result.ok).toBe(true);
-    expect(result.safeUnwrap()).toEqual({ success: true });
+    expect(result.unsafeUnwrap()).toEqual({ success: true });
   });
 
   it('resolves with an Err when error is returned', async () => {

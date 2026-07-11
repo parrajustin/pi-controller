@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod init github.com/parrajustin/pi-controller/pkg/lounge_display && go mod tidy
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /build/display_server ./display_server/main.go
+    CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o /build/display_server ./display_server
 
 # Stage 6: Build token_receiver Rust binary
 FROM rust:slim AS rust_builder
