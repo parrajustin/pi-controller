@@ -19,10 +19,16 @@ const resource = resourceFromAttributes({
 
 // Tracing
 if (process.env.NODE_ENV !== 'test') {
+  const getOtlpHost = () => {
+    if (window.location.hostname === 'lounge_display') return 'otel-collector';
+    return window.location.hostname || 'localhost';
+  };
+  const otlpUrl = `http://${getOtlpHost()}:4318`;
+
   const provider = new WebTracerProvider({ 
     resource,
     spanProcessors: [
-      new BatchSpanProcessor(new OTLPTraceExporter())
+      new BatchSpanProcessor(new OTLPTraceExporter({ url: `${otlpUrl}/v1/traces` }))
     ]
   });
   provider.register({
@@ -34,7 +40,7 @@ if (process.env.NODE_ENV !== 'test') {
     resource,
     readers: [
       new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter(),
+        exporter: new OTLPMetricExporter({ url: `${otlpUrl}/v1/metrics` }),
         exportIntervalMillis: 10000,
       })
     ]
@@ -45,7 +51,7 @@ if (process.env.NODE_ENV !== 'test') {
   const loggerProvider = new LoggerProvider({ 
     resource,
     processors: [
-      new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() })
+      new BatchLogRecordProcessor({ exporter: new OTLPLogExporter({ url: `${otlpUrl}/v1/logs` }) })
     ]
   });
   logs.setGlobalLoggerProvider(loggerProvider);

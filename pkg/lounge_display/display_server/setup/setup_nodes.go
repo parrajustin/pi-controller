@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,8 +16,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/parrajustin/pi-controller/pkg/lounge_display/cryptoutil"
+	"github.com/chromedp/cdproto/target"
+	"github.com/chromedp/chromedp"
+	"github.com/parrajustin/pi-controller/pkg/lounge_display/browser"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/calendarclient"
+	"github.com/parrajustin/pi-controller/pkg/lounge_display/cryptoutil"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
@@ -78,6 +82,9 @@ func runReceiver(binPath string) (string, *exec.Cmd, error) {
 }
 
 var (
+	WaitWebServerNode        *Node
+	InitDisplay2CDPNode      *Node
+	WaitForClientCallbackNode *Node
 	CredentialsNode          *Node
 	AuthTokenNode            *Node
 	WorkspaceRedirectedNode  *Node
@@ -93,6 +100,131 @@ var (
 )
 
 func init() {
+	WaitWebServerNode = &Node{
+		Name: "wait_web_server",
+		Setup: func(s *StateContext) error {
+			s.DefaultNode = WaitWebServerNode
+			return nil
+		},
+		PreCheck: func(s *StateContext) bool { return true },
+		Work: func(s *StateContext) error {
+			port := s.PortFlag
+			if port == "" {
+				port = "8080"
+			}
+			url := fmt.Sprintf("http://127.0.0.1:%s/", port)
+			slog.Info("Waiting for web server to start...", "url", url)
+			for {
+				resp, err := http.Get(url)
+				if err == nil {
+					resp.Body.Close()
+					slog.Info("Web server is up!")
+					return nil
+				}
+				slog.Debug("Web server not ready, retrying...", "error", err)
+				s.Clock.Sleep(1 * time.Second)
+			}
+		},
+	}
+
+	InitDisplay2CDPNode = &Node{
+		Name:     "Init Display 2 CDP",
+		Setup: func(s *StateContext) error {
+			s.mu.Lock()
+			s.DisplayActive = false
+			s.mu.Unlock()
+			s.AddWSHandler("validate_display_active", func(payload json.RawMessage) (interface{}, error) {
+				s.mu.Lock()
+				s.DisplayActive = true
+				s.mu.Unlock()
+				return map[string]string{"status": "ok"}, nil
+			})
+			return nil
+		},
+		PreCheck: func(s *StateContext) bool { return true },
+		Work: func(s *StateContext) error {
+			kioskIP := os.Getenv("KIOSK_IP")
+			if kioskIP == "" {
+				kioskIP = "127.0.0.1"
+			}
+			if ips, err := net.LookupIP(kioskIP); err == nil && len(ips) > 0 {
+				kioskIP = ips[0].String()
+			}
+			cdpPort := os.Getenv("DISPLAY2_CDP_PORT")
+			if cdpPort == "" {
+				cdpPort = "9225"
+			}
+			wsURL := fmt.Sprintf("ws://%s:%s", kioskIP, cdpPort)
+			slog.Info("Connecting to Display 2 Chrome", "url", wsURL)
+
+			for {
+				allocCtx, allocCancel := chromedp.NewRemoteAllocator(context.Background(), wsURL)
+				ctx, ctxCancel := chromedp.NewContext(allocCtx)
+
+				targets, err := chromedp.Targets(ctx)
+				if err == nil {
+					var activeTarget *target.Info
+					for _, t := range targets {
+						if t.Type == "page" && !strings.HasPrefix(t.URL, "chrome://") && !strings.HasPrefix(t.URL, "devtools://") {
+							activeTarget = t
+							break
+						}
+					}
+					if activeTarget != nil {
+						targetCtx, targetCancel := chromedp.NewContext(allocCtx, chromedp.WithTargetID(activeTarget.TargetID))
+
+						b := browser.NewRealBrowser(targetCtx)
+						targetUrl := os.Getenv("DISPLAY2_URL")
+						if targetUrl == "" {
+							targetUrl = "http://localhost:8080"
+						}
+						slog.Info("Navigating Display 2", "url", targetUrl)
+						err := b.Navigate(targetUrl)
+						if err == nil {
+							// Successfully told the browser to navigate.
+							// Do not cancel the contexts here, as cancelling the allocator
+							// or target context can cause Chrome to exit or close the target.
+							// We intentionally leave the CDP connection open so Chrome stays alive.
+							return nil
+						}
+						slog.Warn("Navigation failed, will retry", "error", err)
+						targetCancel()
+					}
+				}
+				ctxCancel()
+				allocCancel()
+
+				slog.Warn("Failed to connect to Display 2 CDP or find target. Retrying in 5 seconds...")
+				s.Clock.Sleep(5 * time.Second)
+			}
+		},
+	}
+
+	WaitForClientCallbackNode = &Node{
+		Name: "Wait For Client Callback",
+		PreCheck: func(s *StateContext) bool { return true },
+		DoneCheck: func(s *StateContext) error {
+			slog.Info("Polling for validate_display_active websocket call (up to 10 minutes)...")
+			deadline := s.Clock.Now().Add(10 * time.Minute)
+			for s.Clock.Now().Before(deadline) {
+				s.mu.Lock()
+				active := s.DisplayActive
+				s.mu.Unlock()
+				
+				if active {
+					slog.Info("validate_display_active called by client!")
+					return nil
+				}
+				s.Clock.Sleep(1 * time.Second)
+			}
+			return fmt.Errorf("timed out waiting for display active")
+		},
+		Teardown: func(s *StateContext) error {
+			s.RemoveWSHandler("validate_display_active")
+			return nil
+		},
+	}
+
 	CredentialsNode = &Node{
 		Name:       "Credentials Phase",
 		IsRestNode: true,
@@ -224,7 +356,7 @@ func init() {
 				os.WriteFile(tokPath, ciphertext, 0600)
 			}
 			hasToken = true
-			
+
 			// Also initialize the CalendarClient here so we have it later
 			ctx := context.Background()
 			client := config.Client(ctx, tok)
@@ -261,7 +393,9 @@ func init() {
 		Name: "Workspace Redirected",
 		PreCheck: func(s *StateContext) bool {
 			urlStr, err := s.Browser.Location()
-			if err != nil { return false }
+			if err != nil {
+				return false
+			}
 			u, err := url.Parse(urlStr)
 			return err == nil && u.Host == "workspace.google.com"
 		},
@@ -280,7 +414,7 @@ func init() {
 				`, &res); err != nil {
 				return err
 			}
-			return s.Browser.Sleep(3*time.Second)
+			return s.Browser.Sleep(3 * time.Second)
 		},
 	}
 
@@ -288,7 +422,9 @@ func init() {
 		Name: "Accounts Google Page",
 		PreCheck: func(s *StateContext) bool {
 			urlStr, err := s.Browser.Location()
-			if err != nil { return false }
+			if err != nil {
+				return false
+			}
 			u, err := url.Parse(urlStr)
 			return err == nil && u.Host == "accounts.google.com"
 		},
@@ -339,7 +475,7 @@ func init() {
 				`, &res); err != nil {
 				return err
 			}
-			return s.Browser.Sleep(2*time.Second)
+			return s.Browser.Sleep(2 * time.Second)
 		},
 	}
 
@@ -370,7 +506,7 @@ func init() {
 				`, &res); err != nil {
 				return err
 			}
-			return s.Browser.Sleep(2*time.Second)
+			return s.Browser.Sleep(2 * time.Second)
 		},
 	}
 
@@ -382,13 +518,25 @@ func init() {
 			return exists
 		},
 		Work: func(s *StateContext) error {
-			if err := s.Browser.WaitVisible(`#identifierId`, true); err != nil { return err }
-			if err := s.Browser.Click(`#identifierId`, true); err != nil { return err }
-			if err := s.Browser.Sleep(500*time.Millisecond); err != nil { return err }
-			if err := s.Browser.SendKeys(`#identifierId`, s.Email, true); err != nil { return err }
-			if err := s.Browser.Sleep(500*time.Millisecond); err != nil { return err }
-			if err := s.Browser.Click(`#identifierNext button`, false); err != nil { return err }
-			return s.Browser.Sleep(3*time.Second)
+			if err := s.Browser.WaitVisible(`#identifierId`, true); err != nil {
+				return err
+			}
+			if err := s.Browser.Click(`#identifierId`, true); err != nil {
+				return err
+			}
+			if err := s.Browser.Sleep(500 * time.Millisecond); err != nil {
+				return err
+			}
+			if err := s.Browser.SendKeys(`#identifierId`, s.Email, true); err != nil {
+				return err
+			}
+			if err := s.Browser.Sleep(500 * time.Millisecond); err != nil {
+				return err
+			}
+			if err := s.Browser.Click(`#identifierNext button`, false); err != nil {
+				return err
+			}
+			return s.Browser.Sleep(3 * time.Second)
 		},
 	}
 
@@ -419,10 +567,16 @@ func init() {
 		Work: func(s *StateContext) error {
 			slog.Info("Waiting for password on POST /api/password ...")
 			password := <-s.PasswordChan
-			if err := s.Browser.SendKeys(`input[type="password"]`, password, false); err != nil { return err }
-			if err := s.Browser.Sleep(500*time.Millisecond); err != nil { return err }
-			if err := s.Browser.Click(`#passwordNext button`, false); err != nil { return err }
-			return s.Browser.Sleep(3*time.Second)
+			if err := s.Browser.SendKeys(`input[type="password"]`, password, false); err != nil {
+				return err
+			}
+			if err := s.Browser.Sleep(500 * time.Millisecond); err != nil {
+				return err
+			}
+			if err := s.Browser.Click(`#passwordNext button`, false); err != nil {
+				return err
+			}
+			return s.Browser.Sleep(3 * time.Second)
 		},
 	}
 

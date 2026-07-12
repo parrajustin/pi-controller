@@ -172,3 +172,28 @@ func TestEngine_RestNodePreCheckFailure(t *testing.T) {
 
 	assert.Equal(t, "Default", s.GetNodeName(), "RestNode PreCheck failure should revert to Default Node")
 }
+
+func TestEngine_AllRegisteredNodesHavePreCheck(t *testing.T) {
+	startNode := InitNodes()
+	visited := make(map[*Node]bool)
+	var queue []*Node
+	queue = append(queue, startNode)
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+
+		if visited[curr] {
+			continue
+		}
+		visited[curr] = true
+
+		if curr.PreCheck == nil {
+			t.Errorf("Node %q is missing a PreCheck. It will be unreachable by the engine.", curr.Name)
+		}
+
+		for _, next := range curr.Next {
+			queue = append(queue, next)
+		}
+	}
+}

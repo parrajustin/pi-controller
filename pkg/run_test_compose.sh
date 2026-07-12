@@ -3,9 +3,24 @@
 # Ensure we're running from the directory where the script is located
 cd "$(dirname "$0")"
 
+export RECORD_SCREENS="false"
+
+# Parse arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --record_screens) RECORD_SCREENS="true" ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
+
 # Create necessary directories
 mkdir -p ./kiosk_debug/chrome-data
 chmod 777 ./kiosk_debug/chrome-data
+mkdir -p ./kiosk_debug/chrome-data-2
+chmod 777 ./kiosk_debug/chrome-data-2
+mkdir -p ./kiosk_debug/recordings
+chmod 777 ./kiosk_debug/recordings
 mkdir -p ./lounge_display/oauth_test
 mkdir -p ./lounge_display/logs
 

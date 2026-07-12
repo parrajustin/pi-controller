@@ -156,7 +156,7 @@ func TestEngine_VerifyAllNodesHandlers(t *testing.T) {
 	// We also know InitNodes adds "has_wifi" to all 13 setup nodes
 	InitNodes()
 	setupNodes := []*Node{
-		InitServerNode, CredentialsNode, AuthTokenNode, CalendarNode,
+		InitServerNode, WaitWebServerNode, InitDisplay2CDPNode, WaitForClientCallbackNode, CredentialsNode, AuthTokenNode, CalendarNode,
 		WorkspaceRedirectedNode, AccountsGooglePageNode, ChooseAccountNode,
 		AccountOptionExistsNode, AccountOptionMissingNode, EmailInputNode,
 		PasswordInputNode, WrongPasswordNode, TwoFactorNode,

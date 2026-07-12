@@ -13,11 +13,11 @@ import { wsClient } from '../ws-client.js';
 import { getAppClock } from '../clock-provider.js';
 
 const SETUP_STEPS = [
-  { phase: 1, text: 'Init Server' },
-  { phase: 2, text: 'Upload credentials.json' },
-  { phase: 3, text: 'Get auth token' },
-  { phase: 4, text: 'Get Calendar Events' },
-  { phase: 13, text: 'Checking Google Login' }
+  { phase: 4, startPhase: 1, endPhase: 4, text: 'Init Server' },
+  { phase: 5, startPhase: 5, endPhase: 5, text: 'Upload credentials.json' },
+  { phase: 6, startPhase: 6, endPhase: 6, text: 'Get auth token' },
+  { phase: 7, startPhase: 7, endPhase: 7, text: 'Get Calendar Events' },
+  { phase: 16, startPhase: 8, endPhase: 16, text: 'Checking Google Login' }
 ];
 
 @customElement('setup-display')
@@ -533,10 +533,7 @@ export class SetupDisplay extends LitElement {
           
           ${SETUP_STEPS.map(step => {
             const isCompleted = this.setupPhase > step.phase;
-            // For step 13 (Google Login), it's active if setupPhase is between 5 and 13
-            const isActive = step.phase === 13 
-              ? (this.setupPhase >= 5 && this.setupPhase <= 13)
-              : this.setupPhase === step.phase;
+            const isActive = this.setupPhase >= step.startPhase && this.setupPhase <= step.endPhase;
             
             return html`
               <div class="stage-container ${isCompleted ? 'completed-hide' : ''}">

@@ -25,7 +25,10 @@ func InitNodes() *Node {
 	// Link nodes together
 
 	// 1. Setup Nodes (from setup_nodes.go)
-	InitServerNode.Next = []*Node{CredentialsNode}
+	InitServerNode.Next = []*Node{WaitWebServerNode}
+	WaitWebServerNode.Next = []*Node{InitDisplay2CDPNode}
+	InitDisplay2CDPNode.Next = []*Node{WaitForClientCallbackNode}
+	WaitForClientCallbackNode.Next = []*Node{CredentialsNode}
 	CredentialsNode.Next = []*Node{AuthTokenNode}
 	AuthTokenNode.Next = []*Node{CalendarNode}
 	CalendarNode.Next = []*Node{InitCDPNode}
@@ -51,7 +54,7 @@ func InitNodes() *Node {
 
 	// 3. Add has_wifi WS handler to all initial setup nodes
 	setupNodes := []*Node{
-		InitServerNode, CredentialsNode, AuthTokenNode, CalendarNode,
+		InitServerNode, WaitWebServerNode, InitDisplay2CDPNode, WaitForClientCallbackNode, CredentialsNode, AuthTokenNode, CalendarNode,
 		WorkspaceRedirectedNode, AccountsGooglePageNode, ChooseAccountNode,
 		AccountOptionExistsNode, AccountOptionMissingNode, EmailInputNode,
 		PasswordInputNode, WrongPasswordNode, TwoFactorNode,

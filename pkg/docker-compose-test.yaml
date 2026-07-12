@@ -8,10 +8,18 @@ services:
     shm_size: 2g
     ports:
       - "5050:5050"
+      - "5051:5051"
       - "9222:9223"
+      - "9224:9225"
       - "5900:5900"
+      - "5901:5901"
+    environment:
+      - RECORD_SCREENS=${RECORD_SCREENS:-false}
+      - LAUNCH_URL_2=http://lounge_display:8080
     volumes:
       - "./kiosk_debug/chrome-data:/chrome-data"
+      - "./kiosk_debug/chrome-data-2:/chrome-data-2"
+      - "./kiosk_debug/recordings:/recordings"
     restart: always
 
   lounge_display:
@@ -30,6 +38,7 @@ services:
       - CDP_PORT=9223
       - TOKEN_ENCRYPTION_KEY=default_local_dev_key_change_me_in_prod
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - DISPLAY2_URL=http://lounge_display:8080
     volumes:
       - "./lounge_display/oauth_test:/oauth"
       - "./lounge_display/logs:/app/logs"
@@ -62,6 +71,8 @@ services:
       - ./lgtm/tempo-config.yaml:/otel-lgtm/tempo-config.yaml:ro
 
   otel-collector:
+    logging:
+      driver: none
     image: otel/opentelemetry-collector-contrib:latest
     container_name: otel-collector
     command: ["--config=/etc/otel-collector-config.yaml"]

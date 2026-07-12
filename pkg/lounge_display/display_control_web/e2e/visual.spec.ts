@@ -78,7 +78,7 @@ test.describe('Lounge Display Visual Regression', () => {
     // =========================================
     // STATE 2: Setup - Upload Credentials
     // =========================================
-    sendToClient({ type: 'state_update', payload: { setup_ready: false, current_node: 'Credentials Phase', setup_phase: 2, phase: 'setup' } });
+    sendToClient({ type: 'state_update', payload: { setup_ready: false, current_node: 'Credentials Phase', setup_phase: 5, phase: 'setup' } });
     
     const getIpMsg = await waitForClientMessage('get_ip');
     sendToClient({ id: getIpMsg.id, type: 'response', payload: { ip: '192.168.1.100' } });
@@ -98,7 +98,7 @@ test.describe('Lounge Display Visual Regression', () => {
     // =========================================
     // STATE 3: Setup - Get Auth Token
     // =========================================
-    sendToClient({ type: 'state_update', payload: { setup_ready: false, current_node: 'Auth Token Phase', setup_phase: 3, phase: 'setup' } });
+    sendToClient({ type: 'state_update', payload: { setup_ready: false, current_node: 'Auth Token Phase', setup_phase: 6, phase: 'setup' } });
     
     const getAuthMsg = await waitForClientMessage('get_auth_url');
     sendToClient({ id: getAuthMsg.id, type: 'response', payload: { url: 'https://accounts.google.com/o/oauth2/auth?test' } });
@@ -109,7 +109,7 @@ test.describe('Lounge Display Visual Regression', () => {
     // =========================================
     // STATE 4: Setup - Password Input
     // =========================================
-    sendToClient({ type: 'state_update', payload: { setup_ready: false, current_node: 'Password Input Page', setup_phase: 13, phase: 'setup' } });
+    sendToClient({ type: 'state_update', payload: { setup_ready: false, current_node: 'Password Input Page', setup_phase: 14, phase: 'setup' } });
     
     await page.clock.fastForward(1500);
     await expect(page).toHaveScreenshot('04-setup-password-input.png');

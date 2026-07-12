@@ -194,8 +194,15 @@ export class DisplayController extends LitElement {
     super.connectedCallback();
     
     this.unsubscribe = wsClient.onStateUpdate((state) => {
+      console.log('WS State Update: Current Node ->', state.current_node);
       this.serverState = state;
       this.setupCompleted = state.setup_ready === true;
+      
+      if (state.current_node === 'Wait For Client Callback' || state.current_node === 'Init Display 2 CDP') {
+        wsClient.request({ type: 'validate_display_active' }).catch(e => {
+          console.error('Failed to validate display active', e);
+        });
+      }
     });
 
     const res = await WrapPromise(fetch('/api/setup_done'), 'Failed to fetch setup status');

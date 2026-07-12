@@ -71,6 +71,7 @@ type StateContext struct {
 	RegisteredRoutes map[string]bool
 	Email            string
 	PasswordChan     chan string
+	DisplayActive    bool
 	ReceiverFlag     string
 	SetupReady       bool
 
@@ -150,6 +151,13 @@ func (s *StateContext) BroadcastState() {
 			delete(s.WSConns, conn)
 		}
 	}
+}
+
+// WriteWSJSON safely writes a JSON message to a websocket connection using the context's mutex
+func (s *StateContext) WriteWSJSON(conn *websocket.Conn, v interface{}) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return conn.WriteJSON(v)
 }
 
 func (s *StateContext) SetNodeName(name string) {

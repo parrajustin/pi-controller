@@ -290,7 +290,10 @@ func main() {
 				} else {
 					res["payload"] = resPayload
 				}
-				conn.WriteJSON(res)
+				err := stateCtx.WriteWSJSON(conn, res)
+				if err != nil {
+					slog.Error("Failed to write websocket response", "error", err)
+				}
 			}
 			
 			statusAttr := "success"
