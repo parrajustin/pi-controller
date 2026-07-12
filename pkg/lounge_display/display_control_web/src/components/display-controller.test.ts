@@ -82,7 +82,7 @@ describe('DisplayController', () => {
     await el.updateComplete;
 
     // Verify fetch was called
-    expect(global.fetch).toHaveBeenCalledWith('http://localhost:6060/reboot', expect.objectContaining({
+    expect(global.fetch).toHaveBeenCalledWith('/api/reboot/', expect.objectContaining({
       method: 'POST'
     }));
   });

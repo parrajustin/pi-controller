@@ -26,6 +26,7 @@ var (
 	nodePhaseDuration metric.Float64Histogram
 	nodeVisits        metric.Int64Counter
 	nodeRestIdleTime  metric.Float64Histogram
+	cdpConnectionLossCount metric.Int64Counter
 )
 
 func init() {
@@ -39,6 +40,8 @@ func init() {
 	if err != nil { panic(err) }
 	nodeRestIdleTime, err = meter.Float64Histogram("node.rest.idle_time", metric.WithDescription("Idle time in rest nodes"), metric.WithUnit("s"))
 	if err != nil { panic(err) }
+	cdpConnectionLossCount, err = meter.Int64Counter("cdp.connection.loss", metric.WithDescription("Count of CDP connection losses"))
+	if err != nil { panic(err) }
 }
 
 type StateContext struct {
@@ -48,8 +51,10 @@ type StateContext struct {
 	SetupPhase  int
 
 	Browser        browser.Browser
+	Browser2       browser.Browser
 	CalendarClient calendarclient.CalendarClient
 	Ctx            context.Context
+	Ctx2           context.Context
 	Clock          Clock
 
 	Mux *http.ServeMux
@@ -77,6 +82,7 @@ type StateContext struct {
 
 	WSConns    map[*websocket.Conn]bool
 	WSHandlers map[string]func(payload json.RawMessage) (interface{}, error)
+	ForceResetChan chan *Node
 }
 
 func (s *StateContext) AddWSHandler(msgType string, handler func(payload json.RawMessage) (interface{}, error)) {
@@ -231,6 +237,17 @@ func (s *StateContext) SetSetupReady(ready bool) {
 	s.BroadcastState()
 }
 
+func (s *StateContext) GetBrowser(screenID string) browser.Browser {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if screenID == "0" {
+		return s.Browser2
+	} else if screenID == "1" {
+		return s.Browser
+	}
+	return nil
+}
+
 type Node struct {
 	Name               string
 	IsRestNode         bool
@@ -282,7 +299,17 @@ func RunEngine(startNode *Node, s *StateContext) {
 	if s.DefaultNode == nil {
 		s.DefaultNode = startNode
 	}
+	if s.ForceResetChan == nil {
+		s.ForceResetChan = make(chan *Node, 1)
+	}
 	for {
+		select {
+		case forced := <-s.ForceResetChan:
+			currentNode = forced
+			slog.Info("Forced reset to node", "node", forced.Name)
+		default:
+		}
+		
 		s.StepCounter++
 		slog.Info("Executing Node", "step", s.StepCounter, "node", currentNode.Name)
 		s.SetNodeName(currentNode.Name)

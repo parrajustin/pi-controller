@@ -181,3 +181,8 @@ func (b *FakeBrowser) CaptureScreenshot(res *[]byte) error {
 	*res = []byte("fake_image_data")
 	return nil
 }
+
+func (b *FakeBrowser) Reload() error {
+	b.ActionLog = append(b.ActionLog, "Reload")
+	return nil
+}

@@ -16,6 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/browser"
@@ -82,8 +85,9 @@ func runReceiver(binPath string) (string, *exec.Cmd, error) {
 }
 
 var (
-	WaitWebServerNode        *Node
-	InitDisplay2CDPNode      *Node
+	WaitWebServerNode         *Node
+	InitDisplay2CDPNode       *Node
+	InitCDPNode               *Node
 	WaitForClientCallbackNode *Node
 	CredentialsNode          *Node
 	AuthTokenNode            *Node
@@ -100,6 +104,75 @@ var (
 )
 
 func init() {
+	InitCDPNode = &Node{
+		Name: "Init CDP",
+		PreCheck: func(s *StateContext) bool { return true },
+		Work: func(s *StateContext) error {
+			kioskIP := os.Getenv("KIOSK_IP")
+			if kioskIP == "" {
+				kioskIP = "127.0.0.1"
+			}
+			if ips, err := net.LookupIP(kioskIP); err == nil && len(ips) > 0 {
+				kioskIP = ips[0].String()
+			}
+			cdpPort := os.Getenv("CDP_PORT")
+			if cdpPort == "" {
+				cdpPort = "9222"
+			}
+			wsURL := fmt.Sprintf("ws://%s:%s", kioskIP, cdpPort)
+			slog.Info("Connecting to Chrome", "url", wsURL)
+
+			for {
+				allocCtx, _ := chromedp.NewRemoteAllocator(context.Background(), wsURL)
+				ctx, _ := chromedp.NewContext(allocCtx)
+
+				targets, err := chromedp.Targets(ctx)
+				if err == nil {
+					var activeTarget *target.Info
+					for _, t := range targets {
+						if t.Type == "page" && !strings.HasPrefix(t.URL, "chrome://") && !strings.HasPrefix(t.URL, "devtools://") {
+							activeTarget = t
+							break
+						}
+					}
+					if activeTarget != nil {
+						targetCtx, _ := chromedp.NewContext(allocCtx, chromedp.WithTargetID(activeTarget.TargetID))
+						
+						// Initialize real browser here
+						s.Browser = browser.NewRealBrowser(targetCtx)
+						s.Ctx = ctx
+						
+						go func(monitorCtx context.Context, sCtx *StateContext) {
+							<-monitorCtx.Done()
+							slog.Warn("CDP Connection lost on main screen (port 9222)")
+							cdpConnectionLossCount.Add(context.Background(), 1, metric.WithAttributes(attribute.String("screen", "main")))
+							sCtx.mu.Lock()
+							sCtx.Browser = nil
+							if sCtx.ForceResetChan != nil {
+								select {
+								case sCtx.ForceResetChan <- sCtx.DefaultNode:
+								default:
+								}
+							}
+							sCtx.mu.Unlock()
+						}(ctx, s)
+
+						// Keep target ctx around in case we need it elsewhere (or it gets GC'd)
+						
+						// Check if connection works
+						var tmp string
+						if _, err := s.Browser.Location(); err == nil || tmp == "" { // Ignore error for init
+							slog.Info("CDP Connected.")
+							return nil
+						}
+					}
+				}
+				slog.Warn("Failed to connect to CDP or find target. Retrying in 5 seconds...")
+				s.Clock.Sleep(5 * time.Second)
+			}
+		},
+	}
+
 	WaitWebServerNode = &Node{
 		Name: "wait_web_server",
 		Setup: func(s *StateContext) error {
@@ -181,6 +254,26 @@ func init() {
 						slog.Info("Navigating Display 2", "url", targetUrl)
 						err := b.Navigate(targetUrl)
 						if err == nil {
+							s.mu.Lock()
+							s.Browser2 = b
+							s.Ctx2 = ctx
+							s.mu.Unlock()
+							
+							go func(monitorCtx context.Context, sCtx *StateContext) {
+								<-monitorCtx.Done()
+								slog.Warn("CDP Connection lost on display page (port 9223)")
+								cdpConnectionLossCount.Add(context.Background(), 1, metric.WithAttributes(attribute.String("screen", "display_page")))
+								sCtx.mu.Lock()
+								sCtx.Browser2 = nil
+								if sCtx.ForceResetChan != nil {
+									select {
+									case sCtx.ForceResetChan <- sCtx.DefaultNode:
+									default:
+									}
+								}
+								sCtx.mu.Unlock()
+							}(ctx, s)
+
 							// Successfully told the browser to navigate.
 							// Do not cancel the contexts here, as cancelling the allocator
 							// or target context can cause Chrome to exit or close the target.

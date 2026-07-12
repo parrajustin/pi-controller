@@ -1,23 +1,15 @@
 package setup
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/url"
-	"os"
 	"strings"
 	"time"
-
-	"github.com/chromedp/cdproto/target"
-	"github.com/chromedp/chromedp"
-	"github.com/parrajustin/pi-controller/pkg/lounge_display/browser"
 )
 
 var (
-	InitCDPNode             *Node
 	StartMeetNode           *Node
 	MeetLandingPageNode     *Node
 	NavigateToMeeting       *Node
@@ -28,59 +20,6 @@ var (
 )
 
 func init() {
-	InitCDPNode = &Node{
-		Name: "Init CDP",
-		PreCheck: func(s *StateContext) bool { return true },
-		Work: func(s *StateContext) error {
-			kioskIP := os.Getenv("KIOSK_IP")
-			if kioskIP == "" {
-				kioskIP = "127.0.0.1"
-			}
-			if ips, err := net.LookupIP(kioskIP); err == nil && len(ips) > 0 {
-				kioskIP = ips[0].String()
-			}
-			cdpPort := os.Getenv("CDP_PORT")
-			if cdpPort == "" {
-				cdpPort = "9222"
-			}
-			wsURL := fmt.Sprintf("ws://%s:%s", kioskIP, cdpPort)
-			slog.Info("Connecting to Chrome", "url", wsURL)
-
-			for {
-				allocCtx, _ := chromedp.NewRemoteAllocator(context.Background(), wsURL)
-				ctx, _ := chromedp.NewContext(allocCtx)
-
-				targets, err := chromedp.Targets(ctx)
-				if err == nil {
-					var activeTarget *target.Info
-					for _, t := range targets {
-						if t.Type == "page" && !strings.HasPrefix(t.URL, "chrome://") && !strings.HasPrefix(t.URL, "devtools://") {
-							activeTarget = t
-							break
-						}
-					}
-					if activeTarget != nil {
-						targetCtx, _ := chromedp.NewContext(allocCtx, chromedp.WithTargetID(activeTarget.TargetID))
-						
-						// Initialize real browser here
-						s.Browser = browser.NewRealBrowser(targetCtx)
-						s.Ctx = ctx
-						// Keep target ctx around in case we need it elsewhere (or it gets GC'd)
-						
-						// Check if connection works
-						var tmp string
-						if _, err := s.Browser.Location(); err == nil || tmp == "" { // Ignore error for init
-							slog.Info("CDP Connected.")
-							return nil
-						}
-					}
-				}
-				slog.Warn("Failed to connect to CDP or find target. Retrying in 5 seconds...")
-				s.Clock.Sleep(5 * time.Second)
-			}
-		},
-	}
-
 	StartMeetNode = &Node{
 		Name: "Start Meet Navigation",
 		PreCheck: func(s *StateContext) bool { return true },

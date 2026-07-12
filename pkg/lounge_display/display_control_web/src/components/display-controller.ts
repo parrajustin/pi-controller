@@ -23,6 +23,42 @@ export class DisplayController extends LitElement {
   @state()
   private showRestartOptions = false;
 
+  @state()
+  private toastMessage = '';
+
+  @state()
+  private showToast = false;
+
+  private async resetKiosk() {
+    const res = await WrapPromise(
+      fetch(`/api/reset_kiosk/`, { method: 'POST' }),
+      'Failed to reset kiosk'
+    );
+    if (!res.ok) {
+      console.error(`Reset kiosk failed:`, res.val);
+      this.showToastMessage('Network error: Failed to reset kiosk');
+      return;
+    }
+    
+    const response = res.safeUnwrap();
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`Reset kiosk failed:`, errText);
+      this.showToastMessage(`Reset failed: ${errText}`);
+    } else {
+      this.showToastMessage('Kiosk is resetting...');
+      this.showRestartOptions = false;
+    }
+  }
+
+  private showToastMessage(msg: string) {
+    this.toastMessage = msg;
+    this.showToast = true;
+    setTimeout(() => {
+      this.showToast = false;
+    }, 4000);
+  }
+
   private unsubscribe?: () => void;
 
   static styles = css`
@@ -188,6 +224,30 @@ export class DisplayController extends LitElement {
     .restart-dialog md-filled-button {
       width: 250px;
     }
+
+    .toast {
+      position: absolute;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: var(--card-bg, #28292c);
+      color: var(--text-primary, #e8eaed);
+      padding: 12px 24px;
+      border-radius: 4px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border: 1px solid var(--card-border, #3c4043);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+    }
   `;
 
   async connectedCallback() {
@@ -241,11 +301,30 @@ export class DisplayController extends LitElement {
 
   private async restartDisplay() {
     const res = await WrapPromise(
-      fetch('http://localhost:6060/reboot', { method: 'POST' }),
+      fetch('/api/reboot/', { method: 'POST' }),
       'Failed to send reboot command'
     );
     if (!res.ok) {
       console.error('Reboot failed:', res.val);
+    }
+  }
+
+  private async refreshScreen(screenId: number) {
+    const res = await WrapPromise(
+      fetch(`/api/refresh_screen/${screenId}`),
+      'Failed to refresh screen'
+    );
+    if (!res.ok) {
+      console.error(`Refresh screen ${screenId} failed:`, res.val);
+      this.showToastMessage('Network error: Failed to refresh screen');
+      return;
+    }
+    
+    const response = res.safeUnwrap();
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`Refresh screen ${screenId} failed:`, errText);
+      this.showToastMessage(`Refresh failed: ${errText}`);
     }
   }
 
@@ -290,11 +369,15 @@ export class DisplayController extends LitElement {
           <div class="restart-dialog">
             <h2>Restart Options</h2>
             <md-filled-button @click=${this.restartDisplay}>Restart Display</md-filled-button>
-            <md-filled-button>Refresh Display Page</md-filled-button>
-            <md-filled-button>Refresh Main Screen</md-filled-button>
-            <md-filled-button>Restart Kiosk</md-filled-button>
+            <md-filled-button @click=${() => this.refreshScreen(0)}>Refresh Display Page</md-filled-button>
+            <md-filled-button @click=${() => this.refreshScreen(1)}>Refresh Main Screen</md-filled-button>
+            <md-filled-button @click=${() => this.resetKiosk()}>Reset Kiosk</md-filled-button>
           </div>
         ` : ''}
+        <div class="toast ${this.showToast ? 'show' : ''}">
+          <md-icon>error_outline</md-icon>
+          <span>${this.toastMessage}</span>
+        </div>
       </div>
     `;
   }

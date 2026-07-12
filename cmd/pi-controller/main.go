@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"github.com/parrajustin/pi-controller/pkg/logger"
 )
 
@@ -155,6 +156,33 @@ func handleReboot(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+func handleResetKiosk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	slog.Info("Reset Kiosk API called, pulling and recreating kiosk container...")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Resetting kiosk container..."))
+
+	go func() {
+		pullCmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "pull", "kiosk")
+		pullCmd.Stdout = os.Stdout
+		pullCmd.Stderr = os.Stderr
+		if err := pullCmd.Run(); err != nil {
+			slog.Error(fmt.Sprintf("Failed to pull kiosk: %v", err))
+		}
+
+		upCmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "up", "--build", "--force-recreate", "-d", "kiosk")
+		upCmd.Stdout = os.Stdout
+		upCmd.Stderr = os.Stderr
+		if err := upCmd.Run(); err != nil {
+			slog.Error(fmt.Sprintf("Failed to recreate kiosk: %v", err))
+		}
+	}()
+}
+
 func main() {
 	logger.Init("pi-controller")
 	slog.Info("Starting pi-controller...")
@@ -184,10 +212,14 @@ func main() {
 
 	runNodeExporter()
 
-	http.HandleFunc("/reboot", handleReboot)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/reboot", handleReboot)
+	mux.HandleFunc("/reset_kiosk", handleResetKiosk)
+	otelHandler := otelhttp.NewHandler(mux, "pi-controller")
+
 	go func() {
 		slog.Info("Starting API server on :6060")
-		if err := http.ListenAndServe(":6060", nil); err != nil {
+		if err := http.ListenAndServe(":6060", otelHandler); err != nil {
 			slog.Error(fmt.Sprintf("API server failed: %v", err))
 		}
 	}()

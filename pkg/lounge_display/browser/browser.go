@@ -18,6 +18,7 @@ type Browser interface {
 	Navigate(url string) error
 	OuterHTML(selector string, res *string) error
 	CaptureScreenshot(res *[]byte) error
+	Reload() error
 }
 
 // RealBrowser is a wrapper around chromedp.
@@ -78,4 +79,8 @@ func (b *RealBrowser) OuterHTML(selector string, res *string) error {
 
 func (b *RealBrowser) CaptureScreenshot(res *[]byte) error {
 	return chromedp.Run(b.ctx, chromedp.CaptureScreenshot(res))
+}
+
+func (b *RealBrowser) Reload() error {
+	return chromedp.Run(b.ctx, chromedp.Reload())
 }

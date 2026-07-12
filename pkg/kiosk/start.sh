@@ -104,7 +104,7 @@ launch_chrome() {
 
 # Launch on the first display (usually DSI / card0)
 # DSI is 800x480, normal scaling
-launch_chrome "0.0" "\$LAUNCH_URL" "\$CHROME_DATA_DIR/dsi" "--force-device-scale-factor=1"
+launch_chrome "0.0" "\$LAUNCH_URL" "\$CHROME_DATA_DIR/dsi" "--force-device-scale-factor=1 --remote-debugging-port=9223 --remote-debugging-address=0.0.0.0 --remote-allow-origins=*"
 
 # If we found multiple cards (like the HDMI on card2), launch on the second display!
 if [ "$NUM_CARDS" -ge 2 ]; then

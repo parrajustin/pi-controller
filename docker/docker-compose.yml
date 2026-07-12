@@ -23,6 +23,7 @@ services:
     privileged: true
     ports:
       - 9222:9222
+      - 9223:9223
     volumes:
       - 'settings:/data'
       - 'chrome_data:/chrome-data'

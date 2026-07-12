@@ -22,7 +22,6 @@ import (
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
-
 	"github.com/gorilla/websocket"
 	"github.com/parrajustin/pi-controller/pkg/lounge_display/display_server/setup"
 )
@@ -318,6 +317,93 @@ func main() {
 	mux.HandleFunc("/api/setup_done", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]bool{"setup_ready": stateCtx.GetSetupReady()})
+	})
+
+	mux.HandleFunc("/api/refresh_screen/", func(w http.ResponseWriter, r *http.Request) {
+		screenID := strings.TrimPrefix(r.URL.Path, "/api/refresh_screen/")
+		if screenID != "0" && screenID != "1" {
+			http.Error(w, "Invalid screen ID", http.StatusBadRequest)
+			return
+		}
+
+		b := stateCtx.GetBrowser(screenID)
+		if b == nil {
+			http.Error(w, "Chrome remote protocol connection is not yet established for this screen", http.StatusServiceUnavailable)
+			return
+		}
+
+		err := b.Reload()
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to reload: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
+
+	mux.HandleFunc("/api/reset_kiosk/", func(w http.ResponseWriter, r *http.Request) {
+		hostIP := os.Getenv("HOST_IP")
+		if hostIP == "" {
+			hostIP = "172.17.0.1"
+		}
+		
+		targetURL := fmt.Sprintf("http://%s:6060/reset_kiosk", hostIP)
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, nil)
+		if err != nil {
+			http.Error(w, "Failed to create request", http.StatusInternalServerError)
+			return
+		}
+		client := &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Timeout:   10 * time.Second,
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to reach pi-controller: %v", err), http.StatusInternalServerError)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			http.Error(w, fmt.Sprintf("pi-controller returned status %d", resp.StatusCode), resp.StatusCode)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	})
+
+	mux.HandleFunc("/api/reboot/", func(w http.ResponseWriter, r *http.Request) {
+		hostIP := os.Getenv("HOST_IP")
+		if hostIP == "" {
+			hostIP = "172.17.0.1"
+		}
+		
+		targetURL := fmt.Sprintf("http://%s:6060/reboot", hostIP)
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, nil)
+		if err != nil {
+			http.Error(w, "Failed to create request", http.StatusInternalServerError)
+			return
+		}
+		client := &http.Client{
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+			Timeout:   10 * time.Second,
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to reach pi-controller: %v", err), http.StatusInternalServerError)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			http.Error(w, fmt.Sprintf("pi-controller returned status %d", resp.StatusCode), resp.StatusCode)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	})
 
 	// Run the setup flow
