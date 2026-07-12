@@ -113,6 +113,26 @@ func startDockerCompose() {
 		slog.Info("Successfully started docker compose services.")
 	}
 }
+
+func runNodeExporter() {
+	slog.Info("Starting node_exporter...")
+	cmd := exec.Command("./node_exporter")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		slog.Error(fmt.Sprintf("Failed to start node_exporter: %v", err))
+	} else {
+		slog.Info("Successfully started node_exporter.")
+		go func() {
+			if err := cmd.Wait(); err != nil {
+				slog.Error(fmt.Sprintf("node_exporter exited with error: %v", err))
+			} else {
+				slog.Info("node_exporter exited gracefully.")
+			}
+		}()
+	}
+}
+
 func handleReboot(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -161,6 +181,8 @@ func main() {
 	stopContainers()
 
 	startDockerCompose()
+
+	runNodeExporter()
 
 	http.HandleFunc("/reboot", handleReboot)
 	go func() {

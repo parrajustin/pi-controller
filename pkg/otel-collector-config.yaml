@@ -10,6 +10,13 @@ receivers:
             - "*"
           allowed_headers:
             - "*"
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'node_exporter'
+          scrape_interval: 10s
+          static_configs:
+            - targets: ['host.docker.internal:9100']
 
 exporters:
   otlp/lgtm:
@@ -33,7 +40,7 @@ service:
       processors: [batch]
       exporters: [otlp/lgtm, debug]
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, prometheus]
       processors: [batch]
       exporters: [otlp/lgtm, debug]
     logs:

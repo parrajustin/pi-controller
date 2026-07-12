@@ -51,5 +51,7 @@ services:
       - ../pkg/otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
       - "4318:4318"   # OTLP http for frontend telemetry
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - lgtm
