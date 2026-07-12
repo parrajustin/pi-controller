@@ -9,8 +9,8 @@ This document describes the orchestration of the three main components of the Lo
    - **Mechanism**: It operates the Chrome DevTools Protocol (CDP) to programmatically log in to Google Meet and manage meeting states. It also dynamically generates QR codes for users on the local network to pair with the display.
 
 2. **`kiosk_debug` (Headless Chromium)**
-   - **Role**: A standalone, headless Chromium browser container.
-   - **Mechanism**: It runs a stable Chromium environment tailored for media handling (`--use-fake-ui-for-media-stream`, etc.). It exposes its remote debugging port (CDP) so that `lounge_display` can connect to it, navigate, and interact with the DOM as if it were a real user.
+   - **Role**: A dual-display headless Chromium environment.
+   - **Mechanism**: It runs a stable Chromium environment tailored for media handling. It orchestrates two independent Xvfb displays (`:0` and `:1`) with dedicated `matchbox-window-manager` and `x11vnc`/`websockify` instances for each. Both Chromium instances run heavily isolated with separate data directories and expose separate remote debugging ports (CDP) so `lounge_display` can drive them independently.
 
 3. **`token-receiver`**
    - **Role**: A specialized service dedicated to securely receiving tokens.
@@ -58,3 +58,25 @@ To launch the entire ecosystem seamlessly:
 1. It automatically calculates the `HOST_IP` by determining the active LAN interface.
 2. It sets up the required output directories (`kiosk_debug/chrome-data`, `lounge_display/oauth_test`, `lounge_display/logs`).
 3. It exports the environment variables and triggers `docker compose -f docker-compose-test.yaml up --build`, spinning up all three components simultaneously in the foreground.
+
+## Knowledge Base & Debugging Insights
+
+Over the course of developing and debugging this ecosystem, several tricky architectural and functional issues were resolved. Here is a distilled knowledge base to assist future debugging:
+
+### 1. Concurrency and WebSockets
+- **Concurrent Writes Panic**: The Go backend utilizes `gorilla/websocket`. This library fundamentally does not support concurrent writes to the same connection. A race condition panicked the server when error responses and state updates were broadcast simultaneously.
+- **Resolution**: A thread-safe helper `WriteWSJSON()` was implemented in `StateContext` using a global mutex (`s.mu.Lock()`). All WebSocket handlers must use this synchronized method.
+
+### 2. State Machine Race Conditions
+- **Frontend Phase Mismatches**: When new backend setup nodes (e.g., `WaitWebServerNode`) were added, the numerical indices of setup phases shifted upwards. The frontend (`setup-display.ts`) relied on hardcoded thresholds, causing the UI checklist to silently fail and disappear during the Google Login flow.
+- **Resolution**: Refactored `SETUP_STEPS` in the frontend to explicitly map ranges using `startPhase` and `endPhase` properties, making the active-step checks robust against server-side node insertions.
+- **CDP Connection Readiness**: The backend must not connect to Chromium CDP before the webserver and socat proxies are ready. A `WaitWebServerNode` ensures port 8080 is listening, and a `WaitForClientCallbackNode` blocks backend progression until the frontend connects to the WebSocket.
+
+### 3. Chromium & Docker Quirks
+- **CDP Context Cancellation Kills Chrome**: When managing the second display (`Init Display 2 CDP`), if the remote allocator context is canceled while no other active targets exist, Chrome will instantly exit, leaving VNC showing a black screen. Connections meant to keep a display alive must deliberately leak or store their contexts.
+- **Lingering X11 Lock Files**: Container restarts can leave behind stale X11 lock files (e.g., `/tmp/.X0-lock`) and `SingletonLock` files in Chrome data directories, causing silent crashes. These must be aggressively cleaned at the top of the container entrypoint (`start.sh`).
+- **GPU Contention**: Running two Chromium instances on the same host can trigger GPU context failures (`ContextResult::kTransientFailure`). Appending `--disable-gpu` to the Chromium launch arguments is required.
+
+### 4. Advanced Diagnostics
+- **Screen Recording**: A `--record_screens` flag in `run_test_compose.sh` automatically launches `ffmpeg -f x11grab` to record both Xvfb displays in 1-minute chunks, saving them to the `/recordings` volume. This is essential for diagnosing invisible headless UI bugs.
+- **Log Spam Reduction**: For better visibility of application logs, the `otel-collector` (OpenTelemetry) container is configured with `logging: driver: none` in the docker-compose YAML.
