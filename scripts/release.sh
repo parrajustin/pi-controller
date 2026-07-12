@@ -29,7 +29,7 @@ TOP_LEVEL_ITEMS=$(jq -r '.update_files[]?, .update_directories[]?' config.json |
 
 for item in $TOP_LEVEL_ITEMS; do
   # we copy all data except for the binary data.
-  if [ "$item" != "pi-controller" ] && [ "$item" != "updater" ] && [ "$item" != "runner" ] && [ "$item" != "version.json" ]; then
+  if [ "$item" != "pi-controller" ] && [ "$item" != "updater" ] && [ "$item" != "runner" ] && [ "$item" != "node_exporter" ] && [ "$item" != "version.json" ]; then
     if [ -f "$item" ]; then
       cp "$item" dist/pkg/
     elif [ -d "$item" ]; then
@@ -43,15 +43,31 @@ cp version.json dist/pkg/
 # 4. build all binaries to "dist" for arch and x86 and whatnot
 echo "Building binaries for all architectures to dist/..."
 
+echo "Fetching latest node_exporter version..."
+NODE_EXPORTER_VERSION=$(curl -s https://api.github.com/repos/prometheus/node_exporter/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
+echo "Latest node_exporter version is $NODE_EXPORTER_VERSION"
+
 # aarch64
 GOOS=linux GOARCH=arm64 go build -o dist/pi-controller-aarch64 ./cmd/pi-controller
 GOOS=linux GOARCH=arm64 go build -o dist/updater-aarch64 ./cmd/updater
 GOOS=linux GOARCH=arm64 go build -o dist/runner-aarch64 ./cmd/runner
 
+echo "Downloading node_exporter for aarch64..."
+curl -sL "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-arm64.tar.gz" -o dist/node_exporter-aarch64.tar.gz
+tar -xzf dist/node_exporter-aarch64.tar.gz -C dist --strip-components=1 "node_exporter-${NODE_EXPORTER_VERSION}.linux-arm64/node_exporter"
+mv dist/node_exporter dist/node_exporter-aarch64
+rm dist/node_exporter-aarch64.tar.gz
+
 # x86_64
 GOOS=linux GOARCH=amd64 go build -o dist/pi-controller-x86_64 ./cmd/pi-controller
 GOOS=linux GOARCH=amd64 go build -o dist/updater-x86_64 ./cmd/updater
 GOOS=linux GOARCH=amd64 go build -o dist/runner-x86_64 ./cmd/runner
+
+echo "Downloading node_exporter for x86_64..."
+curl -sL "https://github.com/prometheus/node_exporter/releases/download/v${NODE_EXPORTER_VERSION}/node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64.tar.gz" -o dist/node_exporter-x86_64.tar.gz
+tar -xzf dist/node_exporter-x86_64.tar.gz -C dist --strip-components=1 "node_exporter-${NODE_EXPORTER_VERSION}.linux-amd64/node_exporter"
+mv dist/node_exporter dist/node_exporter-x86_64
+rm dist/node_exporter-x86_64.tar.gz
 
 # 5. For each arch
 for ARCH in aarch64 x86_64; do
@@ -61,6 +77,7 @@ for ARCH in aarch64 x86_64; do
   cp dist/pi-controller-${ARCH} dist/pkg/pi-controller
   cp dist/updater-${ARCH} dist/pkg/updater
   cp dist/runner-${ARCH} dist/pkg/runner
+  cp dist/node_exporter-${ARCH} dist/pkg/node_exporter
   
   # run the release validator for all the files to make sure we have them all
   echo "Verifying files against config.json for $ARCH..."
@@ -79,8 +96,8 @@ done
 
 echo "Cleaning up temporary files from dist folder..."
 rm -rf dist/pkg
-rm -f dist/pi-controller-aarch64 dist/updater-aarch64 dist/runner-aarch64
-rm -f dist/pi-controller-x86_64 dist/updater-x86_64 dist/runner-x86_64
+rm -f dist/pi-controller-aarch64 dist/updater-aarch64 dist/runner-aarch64 dist/node_exporter-aarch64
+rm -f dist/pi-controller-x86_64 dist/updater-x86_64 dist/runner-x86_64 dist/node_exporter-x86_64
 
 echo "Release $VERSION packaged and signed successfully!"
 

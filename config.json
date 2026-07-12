@@ -2,29 +2,24 @@
     "dir": "/home/mason/app",
     "splash-img": "splash.png",
     "update_directories": [
-        "docker",
-        "docker/wifi-connect",
-        "docker/wifi-connect/scripts",
-        "docker/kiosk"
+        "docker"
     ],
     "update_files": [
         "pi-controller",
         "updater",
         "runner",
+        "node_exporter",
         "splash.png",
         "version.json",
         "publickey.pem",
         "config.json",
-        "docker/docker-compose.yml",
-        "docker/wifi-connect/Dockerfile",
-        "docker/wifi-connect/scripts/start.sh",
-        "docker/kiosk/Dockerfile",
-        "docker/kiosk/start.sh"
+        "docker/docker-compose.yml"
     ],
     "root_files": [
         "pi-controller",
         "updater",
         "runner",
+        "node_exporter",
         "config.json",
         "version.json"
     ]
