@@ -80,3 +80,33 @@ The `display_server` communicates with the UI clients primarily through WebSocke
 
 > [!IMPORTANT]
 > **WS Documentation Requirement**: Any time a new WebSocket event is added, or an existing WebSocket method is removed/modified in the engine, you MUST update the [ws_documentation.md](display_server/ws_documentation.md) file to reflect these changes.
+
+## Testing Requirements
+
+> [!CAUTION]
+> **All tests are required to pass** after making any modifications in the `pkg/lounge_display` directory. Ensure you run the complete test suite before finalizing your work.
+
+### Web Applications
+
+The web frontend applications (`display_control_web`, `meeting_control_web`, `setup_web`) use standard NPM tooling for testing, which encompasses unit tests, Playwright visual tests, ESLint linting, and TypeScript compilation checks (tsc). 
+
+To run the complete web test suite for a given frontend component, navigate to its directory and run:
+
+```bash
+cd display_control_web
+npm run test
+```
+*(Repeat for `meeting_control_web` and `setup_web`)*
+
+### Go Server & Integration Tests
+
+The Go components (`display_server`, `setup_server`, `calendarclient`, etc.) include unit tests and end-to-end integration tests.
+
+To run all Go tests and integration tests across the entire `pkg/lounge_display` directory, navigate to the `pkg/lounge_display` directory and run:
+
+```bash
+cd pkg/lounge_display
+go test ./...
+```
+
+This will automatically execute standard Go unit tests as well as the test suite located in `pkg/lounge_display/integration_test`.
