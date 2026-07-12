@@ -31,7 +31,6 @@ import (
 )
 
 // Orchestration channels
-var credChan = make(chan []byte)
 var authCodeChan = make(chan string)
 var authURLStr string
 var hasToken bool
@@ -295,23 +294,8 @@ func init() {
 
 	WaitForClientCallbackNode = &Node{
 		Name: "Wait For Client Callback",
+		IsRestNode: true,
 		PreCheck: func(s *StateContext) bool { return true },
-		DoneCheck: func(s *StateContext) error {
-			slog.Info("Polling for validate_display_active websocket call (up to 10 minutes)...")
-			deadline := s.Clock.Now().Add(10 * time.Minute)
-			for s.Clock.Now().Before(deadline) {
-				s.mu.Lock()
-				active := s.DisplayActive
-				s.mu.Unlock()
-				
-				if active {
-					slog.Info("validate_display_active called by client!")
-					return nil
-				}
-				s.Clock.Sleep(1 * time.Second)
-			}
-			return fmt.Errorf("timed out waiting for display active")
-		},
 		Teardown: func(s *StateContext) error {
 			s.RemoveWSHandler("validate_display_active")
 			return nil
@@ -339,34 +323,27 @@ func init() {
 					http.Error(w, "Failed to read body", http.StatusInternalServerError)
 					return
 				}
-				credChan <- body
+				
+				credPath := filepath.Join(s.OauthDir, "credentials.json")
+				err = os.WriteFile(credPath, body, 0600)
+				if err != nil {
+					http.Error(w, "Failed to write file", http.StatusInternalServerError)
+					return
+				}
+				slog.Info("Saved credentials.json")
+				
 				w.Header().Set("Content-Type", "application/json")
 				w.Write([]byte(`{"status": "ok"}`))
 			})
 			return nil
 		},
-		PreCheck: func(s *StateContext) bool { return true },
+		PreCheck: func(s *StateContext) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.DisplayActive
+		},
 		Work: func(s *StateContext) error {
-			credPath := filepath.Join(s.OauthDir, "credentials.json")
-
-			needsCred := true
-			if info, err := os.Stat(credPath); err == nil && info.Size() > 0 {
-				// Try parsing it
-				credBytes, _ := os.ReadFile(credPath)
-				if _, parseErr := google.ConfigFromJSON(credBytes, calendar.CalendarReadonlyScope); parseErr == nil {
-					needsCred = false
-				}
-			}
-
-			if needsCred {
-				slog.Info("Waiting for credentials on POST /api/cred...")
-				credBytes := <-credChan
-				err := os.WriteFile(credPath, credBytes, 0600)
-				if err != nil {
-					return err
-				}
-				slog.Info("Saved credentials.json")
-			}
+			slog.Info("Waiting for credentials on POST /api/cred (non-blocking)...")
 			return nil
 		},
 	}
@@ -381,7 +358,38 @@ func init() {
 			s.AddWSHandler("submit_token", func(payload json.RawMessage) (interface{}, error) {
 				var p tokenPayload
 				if err := json.Unmarshal(payload, &p); err == nil && p.Code != "" {
-					go func() { authCodeChan <- p.Code }()
+					credPath := filepath.Join(s.OauthDir, "credentials.json")
+					tokPath := filepath.Join(s.OauthDir, "token.json.enc")
+					credBytes, _ := os.ReadFile(credPath)
+					config, _ := google.ConfigFromJSON(credBytes, calendar.CalendarReadonlyScope)
+					if config != nil {
+						baseURL := os.Getenv("OAUTH_REDIRECT_URL")
+						if baseURL == "" {
+							baseURL = "http://localhost:7070"
+						}
+						
+						if s.ReceiverFlag != "" {
+							// For simplicity, we assume the code works with oob if ReceiverFlag isn't handling it perfectly in async.
+							config.RedirectURL = "urn:ietf:wg:oauth:2.0:oob"
+						} else {
+							config.RedirectURL = "urn:ietf:wg:oauth:2.0:oob"
+						}
+		
+						tok, err := config.Exchange(context.Background(), p.Code)
+						if err == nil {
+							tokenBytes, _ := json.Marshal(tok)
+							ciphertext, _ := cryptoutil.Encrypt(tokenBytes, s.EncKey)
+							os.WriteFile(tokPath, ciphertext, 0600)
+							
+							hasToken = true
+							ctx := context.Background()
+							client := config.Client(ctx, tok)
+							srv, _ := calendar.NewService(ctx, option.WithHTTPClient(client))
+							s.CalendarClient = calendarclient.NewRealCalendarClient(srv)
+						} else {
+							slog.Error("Failed to exchange token", "error", err)
+						}
+					}
 				}
 				return map[string]string{"status": "ok"}, nil
 			})
@@ -392,17 +400,22 @@ func init() {
 			s.RemoveWSHandler("submit_token")
 			return nil
 		},
-		PreCheck: func(s *StateContext) bool { return true },
+		PreCheck: func(s *StateContext) bool {
+			credPath := filepath.Join(s.OauthDir, "credentials.json")
+			info, err := os.Stat(credPath)
+			if err == nil && info.Size() > 0 {
+				credBytes, _ := os.ReadFile(credPath)
+				if _, parseErr := google.ConfigFromJSON(credBytes, calendar.CalendarReadonlyScope); parseErr == nil {
+					return true
+				}
+			}
+			return false
+		},
 		Work: func(s *StateContext) error {
 			credPath := filepath.Join(s.OauthDir, "credentials.json")
 			tokPath := filepath.Join(s.OauthDir, "token.json.enc")
 			credBytes, _ := os.ReadFile(credPath)
 			config, _ := google.ConfigFromJSON(credBytes, calendar.CalendarReadonlyScope)
-
-			baseURL := os.Getenv("OAUTH_REDIRECT_URL")
-			if baseURL == "" {
-				baseURL = "http://localhost:7070"
-			}
 
 			var tok *oauth2.Token
 			if ciphertext, err := os.ReadFile(tokPath); err == nil {
@@ -412,64 +425,75 @@ func init() {
 				}
 			}
 
-			if tok == nil || tok.AccessToken == "" {
-				if config == nil {
-					return fmt.Errorf("oauth config is nil, credentials may be missing or invalid")
+			if tok != nil && tok.AccessToken != "" {
+				hasToken = true
+				ctx := context.Background()
+				client := config.Client(ctx, tok)
+				srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
+				if err == nil {
+					s.CalendarClient = calendarclient.NewRealCalendarClient(srv)
 				}
-				if s.ReceiverFlag != "" {
-					ticket, cmd, err := runReceiver(s.ReceiverFlag)
-					if err != nil {
-						return err
-					}
+				return nil
+			}
+
+			if config == nil {
+				return fmt.Errorf("oauth config is nil, credentials may be missing or invalid")
+			}
+			
+			baseURL := os.Getenv("OAUTH_REDIRECT_URL")
+			if baseURL == "" {
+				baseURL = "http://localhost:7070"
+			}
+
+			if s.ReceiverFlag != "" {
+				ticket, cmd, err := runReceiver(s.ReceiverFlag)
+				if err != nil {
+					return err
+				}
+				go func() {
 					defer func() {
 						if cmd != nil && cmd.Process != nil {
 							cmd.Process.Kill()
 						}
 					}()
-					config.RedirectURL = fmt.Sprintf("%s/auth/%s", strings.TrimRight(baseURL, "/"), ticket)
-				} else {
-					config.RedirectURL = "urn:ietf:wg:oauth:2.0:oob"
-				}
-
-				authURLStr = config.AuthCodeURL("state-token",
-					oauth2.AccessTypeOffline,
-					oauth2.SetAuthURLParam("device_id", "lounge-display"),
-					oauth2.SetAuthURLParam("device_name", "Lounge Display"),
-				)
-				slog.Info("Waiting for auth code on authCodeChan...")
-				authCode := <-authCodeChan
-				var err error
-				tok, err = config.Exchange(context.Background(), authCode)
-				if err != nil {
-					return err
-				}
-
-				tokenBytes, _ := json.Marshal(tok)
-				ciphertext, _ := cryptoutil.Encrypt(tokenBytes, s.EncKey)
-				os.WriteFile(tokPath, ciphertext, 0600)
-			}
-			hasToken = true
-
-			// Also initialize the CalendarClient here so we have it later
-			ctx := context.Background()
-			client := config.Client(ctx, tok)
-			srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
-			if err == nil {
-				s.CalendarClient = calendarclient.NewRealCalendarClient(srv)
+					
+					// Wait for receiver code async
+					authCode := <-authCodeChan
+					tok, err = config.Exchange(context.Background(), authCode)
+					if err == nil {
+						tokenBytes, _ := json.Marshal(tok)
+						ciphertext, _ := cryptoutil.Encrypt(tokenBytes, s.EncKey)
+						os.WriteFile(tokPath, ciphertext, 0600)
+						hasToken = true
+						ctx := context.Background()
+						client := config.Client(ctx, tok)
+						srv, _ := calendar.NewService(ctx, option.WithHTTPClient(client))
+						s.CalendarClient = calendarclient.NewRealCalendarClient(srv)
+					}
+				}()
+				config.RedirectURL = fmt.Sprintf("%s/auth/%s", strings.TrimRight(baseURL, "/"), ticket)
+			} else {
+				config.RedirectURL = "urn:ietf:wg:oauth:2.0:oob"
 			}
 
+			authURLStr = config.AuthCodeURL("state-token",
+				oauth2.AccessTypeOffline,
+				oauth2.SetAuthURLParam("device_id", "lounge-display"),
+				oauth2.SetAuthURLParam("device_name", "Lounge Display"),
+			)
+			slog.Info("Waiting for auth code on WS / submit_token (non-blocking)...")
+			
 			return nil
 		},
 	}
 
 	CalendarNode = &Node{
 		Name:     "Calendar Logic Phase",
-		PreCheck: func(s *StateContext) bool { return true },
+		PreCheck: func(s *StateContext) bool { 
+			return s.CalendarClient != nil && hasToken 
+		},
 		Work: func(s *StateContext) error {
 			for {
-				if s.CalendarClient == nil {
-					return fmt.Errorf("CalendarClient is nil")
-				}
 				err := s.CalendarClient.TestConnection()
 				if err != nil {
 					slog.Warn("Unable to retrieve calendar events, retrying in 5 seconds...", "error", err)
@@ -642,7 +666,17 @@ func init() {
 					Password string `json:"password"`
 				}
 				if err := json.Unmarshal(payload, &p); err == nil && p.Password != "" {
-					go func() { s.PasswordChan <- p.Password }()
+					go func(password string) {
+						if err := s.Browser.SendKeys(`input[type="password"]`, password, false); err != nil {
+							slog.Error("Failed to type password", "error", err)
+							return
+						}
+						s.Browser.Sleep(500 * time.Millisecond)
+						if err := s.Browser.Click(`#passwordNext button`, false); err != nil {
+							slog.Error("Failed to click next", "error", err)
+							return
+						}
+					}(p.Password)
 				}
 				return map[string]string{"status": "ok"}, nil
 			})
@@ -657,19 +691,22 @@ func init() {
 			s.Browser.Evaluate(`document.querySelector('input[type="password"]') !== null && document.querySelector('input[type="password"]').offsetWidth > 0`, &exists)
 			return exists
 		},
+		RestNodeValidation: func(s *StateContext) bool {
+			urlStr, err := s.Browser.Location()
+			if err == nil {
+				u, err := url.Parse(urlStr)
+				if err == nil && u.Host == "accounts.google.com" {
+					return true
+				}
+			}
+			// Fallback to original precheck if URL check fails for some reason
+			var exists bool
+			s.Browser.Evaluate(`document.querySelector('input[type="password"]') !== null && document.querySelector('input[type="password"]').offsetWidth > 0`, &exists)
+			return exists
+		},
 		Work: func(s *StateContext) error {
-			slog.Info("Waiting for password on POST /api/password ...")
-			password := <-s.PasswordChan
-			if err := s.Browser.SendKeys(`input[type="password"]`, password, false); err != nil {
-				return err
-			}
-			if err := s.Browser.Sleep(500 * time.Millisecond); err != nil {
-				return err
-			}
-			if err := s.Browser.Click(`#passwordNext button`, false); err != nil {
-				return err
-			}
-			return s.Browser.Sleep(3 * time.Second)
+			slog.Info("Waiting for password on POST /api/password (non-blocking)...")
+			return nil
 		},
 	}
 
@@ -695,6 +732,7 @@ func init() {
 
 	TwoFactorNode = &Node{
 		Name: "2FA or Authenticated",
+		IsRestNode: true,
 		PreCheck: func(s *StateContext) bool {
 			urlStr, err := s.Browser.Location()
 			if err == nil {
@@ -712,20 +750,9 @@ func init() {
 			`, &found)
 			return found
 		},
-		DoneCheck: func(s *StateContext) error {
-			slog.Info("Polling for 2FA completion (up to 10 minutes)...")
-			deadline := s.Clock.Now().Add(10 * time.Minute)
-			for s.Clock.Now().Before(deadline) {
-				urlStr, err := s.Browser.Location()
-				if err == nil {
-					u, err := url.Parse(urlStr)
-					if err == nil && (u.Host == "meet.google.com" || u.Host == "workspace.google.com") {
-						return nil
-					}
-				}
-				s.Clock.Sleep(15 * time.Second)
-			}
-			return fmt.Errorf("timed out waiting for 2FA completion")
+		Work: func(s *StateContext) error {
+			slog.Info("Waiting for 2FA completion (non-blocking)...")
+			return nil
 		},
 	}
 }

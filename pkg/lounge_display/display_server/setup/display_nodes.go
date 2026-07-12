@@ -17,6 +17,7 @@ var (
 	InMeetingNode           *Node
 	LeaveMeetingNode        *Node
 	CheckInvalidMeetingNode *Node
+	BrowserControlNode      *Node
 )
 
 func init() {
@@ -40,13 +41,6 @@ func init() {
 		Name: "Meet Landing Page",
 		IsRestNode: true,
 		PreCheck: func(s *StateContext) bool {
-			s.mu.Lock()
-			target := s.NavTarget
-			s.mu.Unlock()
-			if target != "" {
-				return false
-			}
-
 			urlStr, err := s.Browser.Location()
 			if err != nil {
 				return false
@@ -121,13 +115,6 @@ func init() {
 		Name: "In Meeting",
 		IsRestNode: true,
 		PreCheck: func(s *StateContext) bool {
-			s.mu.Lock()
-			target := s.NavTarget
-			s.mu.Unlock()
-			if target != "" {
-				return false
-			}
-
 			urlStr, err := s.Browser.Location()
 			if err != nil {
 				return false
@@ -272,12 +259,6 @@ func init() {
 		Name: "Join Meeting Page",
 		PreCheck: func(s *StateContext) bool {
 			s.mu.Lock()
-			target := s.NavTarget
-			s.mu.Unlock()
-			if target != "" {
-				return false
-			}
-
 			urlStr, err := s.Browser.Location()
 			if err != nil {
 				return false
@@ -365,6 +346,113 @@ func init() {
 			}
 
 			s.Clock.Sleep(2 * time.Second)
+			return nil
+		},
+	}
+
+	BrowserControlNode = &Node{
+		Name: "BrowserControlNode",
+		IsRestNode: true,
+		PreCheck: func(s *StateContext) bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.NavTarget == "BrowserControlNode"
+		},
+		RestNodeValidation: func(s *StateContext) bool {
+			return true // Stay active until another NavTarget forces a transition
+		},
+		Setup: func(s *StateContext) error {
+			s.AddWSHandler("mouse_move", func(payload json.RawMessage) (interface{}, error) {
+				var p struct {
+					DeltaX float64 `json:"deltaX"`
+					DeltaY float64 `json:"deltaY"`
+				}
+				if err := json.Unmarshal(payload, &p); err != nil {
+					return nil, err
+				}
+				err := s.Browser.MoveCursor(p.DeltaX, p.DeltaY)
+				return map[string]bool{"success": err == nil}, err
+			})
+			s.AddWSHandler("mouse_click", func(payload json.RawMessage) (interface{}, error) {
+				var p struct {
+					Button string `json:"button"`
+				}
+				if err := json.Unmarshal(payload, &p); err != nil {
+					return nil, err
+				}
+				err := s.Browser.ClickAtCursor(p.Button)
+				return map[string]bool{"success": err == nil}, err
+			})
+			s.AddWSHandler("mouse_scroll", func(payload json.RawMessage) (interface{}, error) {
+				var p struct {
+					DeltaY float64 `json:"deltaY"`
+				}
+				if err := json.Unmarshal(payload, &p); err != nil {
+					return nil, err
+				}
+				err := s.Browser.ScrollAtCursor(p.DeltaY)
+				return map[string]bool{"success": err == nil}, err
+			})
+			s.AddWSHandler("keyboard_input", func(payload json.RawMessage) (interface{}, error) {
+				var p struct {
+					Keys string `json:"keys"`
+				}
+				if err := json.Unmarshal(payload, &p); err != nil {
+					return nil, err
+				}
+				err := s.Browser.SendKeyboardInput(p.Keys)
+				return map[string]bool{"success": err == nil}, err
+			})
+			s.AddWSHandler("navigate_url", func(payload json.RawMessage) (interface{}, error) {
+				var p struct {
+					URL string `json:"url"`
+				}
+				if err := json.Unmarshal(payload, &p); err != nil {
+					return nil, err
+				}
+				err := s.Browser.Navigate(p.URL)
+				return map[string]bool{"success": err == nil}, err
+			})
+			s.AddWSHandler("history_back", func(payload json.RawMessage) (interface{}, error) {
+				err := s.Browser.HistoryBack()
+				return map[string]bool{"success": err == nil}, err
+			})
+			s.AddWSHandler("history_forward", func(payload json.RawMessage) (interface{}, error) {
+				err := s.Browser.HistoryForward()
+				return map[string]bool{"success": err == nil}, err
+			})
+			s.AddWSHandler("exit_control", func(payload json.RawMessage) (interface{}, error) {
+				s.mu.Lock()
+				prev := s.PreviousNodeName
+				if prev == "" {
+					prev = "Meet Landing Page"
+				}
+				s.mu.Unlock()
+				s.SetNavTarget(prev, nil)
+				return map[string]bool{"success": true}, nil
+			})
+			s.AddWSHandler("get_url", func(payload json.RawMessage) (interface{}, error) {
+				urlStr, err := s.Browser.Location()
+				return map[string]string{"url": urlStr}, err
+			})
+			return nil
+		},
+		Work: func(s *StateContext) error {
+			s.BroadcastState()
+
+			s.Browser.InjectCursor()
+			return nil
+		},
+		Teardown: func(s *StateContext) error {
+			s.RemoveWSHandler("mouse_move")
+			s.RemoveWSHandler("mouse_click")
+			s.RemoveWSHandler("mouse_scroll")
+			s.RemoveWSHandler("keyboard_input")
+			s.RemoveWSHandler("navigate_url")
+			s.RemoveWSHandler("history_back")
+			s.RemoveWSHandler("history_forward")
+			s.RemoveWSHandler("exit_control")
+			s.RemoveWSHandler("get_url")
 			return nil
 		},
 	}

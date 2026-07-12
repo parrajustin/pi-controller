@@ -186,3 +186,38 @@ func (b *FakeBrowser) Reload() error {
 	b.ActionLog = append(b.ActionLog, "Reload")
 	return nil
 }
+
+func (b *FakeBrowser) InjectCursor() error {
+	b.ActionLog = append(b.ActionLog, "InjectCursor")
+	return nil
+}
+
+func (b *FakeBrowser) MoveCursor(deltaX, deltaY float64) error {
+	b.ActionLog = append(b.ActionLog, fmt.Sprintf("MoveCursor: %f, %f", deltaX, deltaY))
+	return nil
+}
+
+func (b *FakeBrowser) ClickAtCursor(button string) error {
+	b.ActionLog = append(b.ActionLog, fmt.Sprintf("ClickAtCursor: %s", button))
+	return nil
+}
+
+func (b *FakeBrowser) ScrollAtCursor(deltaY float64) error {
+	b.ActionLog = append(b.ActionLog, fmt.Sprintf("ScrollAtCursor: %f", deltaY))
+	return nil
+}
+
+func (b *FakeBrowser) SendKeyboardInput(keys string) error {
+	b.ActionLog = append(b.ActionLog, fmt.Sprintf("SendKeyboardInput: %s", keys))
+	return nil
+}
+
+func (b *FakeBrowser) HistoryBack() error {
+	b.ActionLog = append(b.ActionLog, "HistoryBack")
+	return nil
+}
+
+func (b *FakeBrowser) HistoryForward() error {
+	b.ActionLog = append(b.ActionLog, "HistoryForward")
+	return nil
+}

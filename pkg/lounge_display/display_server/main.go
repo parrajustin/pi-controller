@@ -249,6 +249,9 @@ func main() {
 					ip = getLocalIP()
 				}
 				resPayload = map[string]string{"ip": ip}
+			case "enter_touchpad":
+				stateCtx.SetNavTarget("BrowserControlNode", nil)
+				resPayload = map[string]bool{"success": true}
 			case "get_status":
 				status := "pending"
 				if stateCtx.GetSetupReady() {
@@ -408,5 +411,6 @@ func main() {
 
 	// Run the setup flow
 	startNode := setup.InitNodes()
+	stateCtx.GlobalTransitions = []*setup.Node{setup.BrowserControlNode}
 	setup.RunEngine(startNode, stateCtx)
 }

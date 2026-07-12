@@ -6,6 +6,7 @@ import '@material/web/divider/divider.js';
 import '@material/web/button/filled-button.js';
 import './lounge-display.js';
 import './setup-display.js';
+import './touchpad-controller.js';
 import { wsClient } from '../ws-client.js';
 import { WrapPromise } from 'standard-ts-lib/src/wrap_promise.js';
 
@@ -299,6 +300,11 @@ export class DisplayController extends LitElement {
     this.showRestartOptions = !this.showRestartOptions;
   }
 
+  private enterTouchpadMode() {
+    wsClient.request({ type: 'enter_touchpad' });
+    this.isOpen = false;
+  }
+
   private async restartDisplay() {
     const res = await WrapPromise(
       fetch('/api/reboot/', { method: 'POST' }),
@@ -350,6 +356,10 @@ export class DisplayController extends LitElement {
                   <md-icon>bug_report</md-icon>
                   <span class="nav-label">Test</span>
                 </div>
+                <div class="nav-item" @click=${this.enterTouchpadMode}>
+                  <md-icon>touch_app</md-icon>
+                  <span class="nav-label">Touchpad</span>
+                </div>
                 <div class="nav-item" @click=${this.toggleRestartOptions}>
                   <md-icon>restart_alt</md-icon>
                   <span class="nav-label">Refresh</span>
@@ -359,7 +369,9 @@ export class DisplayController extends LitElement {
           </div>
         </div>
         <div class="main-content">
-          ${this.setupCompleted ? html`
+          ${this.serverState.current_node === 'BrowserControlNode' ? html`
+            <touchpad-controller style="flex-grow: 1;"></touchpad-controller>
+          ` : this.setupCompleted ? html`
             <lounge-display style="flex-grow: 1;"></lounge-display>
           ` : html`
             <setup-display style="flex-grow: 1;"></setup-display>

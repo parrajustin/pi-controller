@@ -47,6 +47,7 @@ func init() {
 type StateContext struct {
 	mu          sync.Mutex
 	CurrentNode string
+	PreviousNodeName string
 	Phase       string
 	SetupPhase  int
 
@@ -83,6 +84,7 @@ type StateContext struct {
 	WSConns    map[*websocket.Conn]bool
 	WSHandlers map[string]func(payload json.RawMessage) (interface{}, error)
 	ForceResetChan chan *Node
+	GlobalTransitions []*Node
 }
 
 func (s *StateContext) AddWSHandler(msgType string, handler func(payload json.RawMessage) (interface{}, error)) {
@@ -168,6 +170,9 @@ func (s *StateContext) WriteWSJSON(conn *websocket.Conn, v interface{}) error {
 
 func (s *StateContext) SetNodeName(name string) {
 	s.mu.Lock()
+	if s.CurrentNode != name {
+		s.PreviousNodeName = s.CurrentNode
+	}
 	s.CurrentNode = name
 	s.mu.Unlock()
 	s.BroadcastState()
@@ -302,6 +307,21 @@ func RunEngine(startNode *Node, s *StateContext) {
 	if s.ForceResetChan == nil {
 		s.ForceResetChan = make(chan *Node, 1)
 	}
+
+	allNodes := make(map[string]*Node)
+	var q []*Node
+	q = append(q, startNode)
+	q = append(q, s.GlobalTransitions...)
+	
+	for len(q) > 0 {
+		curr := q[0]
+		q = q[1:]
+		if _, ok := allNodes[curr.Name]; !ok {
+			allNodes[curr.Name] = curr
+			q = append(q, curr.Next...)
+		}
+	}
+
 	for {
 		select {
 		case forced := <-s.ForceResetChan:
@@ -375,7 +395,7 @@ func RunEngine(startNode *Node, s *StateContext) {
 		}
 
 		s.SetPhase("transitioning")
-		if len(currentNode.Next) == 0 {
+		if len(currentNode.Next) == 0 && !currentNode.IsRestNode {
 			slog.Info("Flow finished successfully at terminal node", "node", currentNode.Name)
 			return
 		}
@@ -399,13 +419,43 @@ func RunEngine(startNode *Node, s *StateContext) {
 				break
 			}
 
-			for _, n := range currentNode.Next {
+			// 1. Check Global Transitions
+			for _, n := range s.GlobalTransitions {
 				if n == currentNode {
-					continue // Ignore self-links
+					continue
 				}
 				if n.PreCheck != nil && n.PreCheck(s) {
 					nextNode = n
 					break
+				}
+			}
+
+			// 2. Check explicitly linked Next transitions
+			if nextNode == nil {
+				for _, n := range currentNode.Next {
+					if n == currentNode {
+						continue // Ignore self-links
+					}
+					if n.PreCheck != nil && n.PreCheck(s) {
+						nextNode = n
+						break
+					}
+				}
+			}
+
+			// 3. If NavTarget is explicitly set, check if it matches a known node in the graph
+			// This allows global transitions to easily exit back to any previous node.
+			if nextNode == nil && s.NavTarget != "" {
+				s.mu.Lock()
+				target := s.NavTarget
+				s.mu.Unlock()
+				if n, ok := allNodes[target]; ok && n != currentNode {
+					if n.PreCheck == nil || n.PreCheck(s) {
+						nextNode = n
+						s.mu.Lock()
+						s.NavTarget = ""
+						s.mu.Unlock()
+					}
 				}
 			}
 

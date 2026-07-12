@@ -39,7 +39,7 @@ func InitNodes() *Node {
 	AccountOptionExistsNode.Next = []*Node{TwoFactorNode, PasswordInputNode, WrongPasswordNode}
 	AccountOptionMissingNode.Next = []*Node{EmailInputNode}
 	EmailInputNode.Next = []*Node{PasswordInputNode}
-	PasswordInputNode.Next = []*Node{TwoFactorNode, WrongPasswordNode, StartMeetNode}
+	PasswordInputNode.Next = []*Node{TwoFactorNode, WrongPasswordNode, MeetLandingPageNode}
 	WrongPasswordNode.Next = []*Node{PasswordInputNode}
 	TwoFactorNode.Next = []*Node{MeetLandingPageNode, CheckInvalidMeetingNode, JoinMeetingNode, InMeetingNode}
 

@@ -41,10 +41,7 @@ func TestMeetLandingPageNode(t *testing.T) {
 	assert.True(t, MeetLandingPageNode.PreCheck(s))
 	assert.True(t, MeetLandingPageNode.RestNodeValidation(s))
 
-	// With NavTarget set, PreCheck should be false
-	s.NavTarget = "NavigateToMeeting"
-	assert.False(t, MeetLandingPageNode.PreCheck(s))
-	s.NavTarget = ""
+
 
 	handler, ok := s.GetWSHandler("join_meeting")
 	assert.True(t, ok)

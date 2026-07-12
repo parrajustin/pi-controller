@@ -1,4 +1,4 @@
-import { WSClient, wsClient } from '../ws-client.js';
+import { wsClient } from '../ws-client.js';
 import { Ok } from 'standard-ts-lib/src/index.js';
 import './display-controller.js';
 import { DisplayController } from './display-controller.js';

@@ -1,7 +1,7 @@
 import './setup-display.js';
 import { SetupDisplay } from './setup-display.js';
 import { wsClient } from '../ws-client.js';
-import { getAppClock, setAppClock } from '../clock-provider.js';
+import { setAppClock } from '../clock-provider.js';
 import { FakeClock } from 'standard-ts-lib/src/clock.js';
 import { Ok, Err, UnknownError } from 'standard-ts-lib/src/index.js';
 

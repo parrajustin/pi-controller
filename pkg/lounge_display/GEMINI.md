@@ -59,10 +59,17 @@ Both `setup_server` and `display_server` use a highly extensible state machine (
 4. **PreCheck (Next Nodes)**: Evaluates possible paths forward from a node's `Next` array. The engine automatically navigates to the first node whose `PreCheck` returns `true`.
 5. **Teardown**: Cleanup operations before transitioning to the next node.
 
-### Rest Nodes & Timeouts
+### Rest Nodes, Timeouts, and Non-Blocking Rules
 Because some stages require indefinite waiting (e.g., human user input, or sitting in a Google Meet), nodes can be explicitly marked as `IsRestNode: true`.
 - **Rest Nodes**: Instead of causing an infinite evaluation loop that spams terminal logs, Rest Nodes instruct the engine to cleanly pause execution while waiting for a valid forward transition (`Next`). While resting, the engine continuously verifies that the current node's `PreCheck` remains valid; if it fails, the engine seamlessly resets. Rest Nodes ignore timeouts.
 - **Normal Nodes**: Any non-rest node is strictly bounded by `s.NodeTimeout` (configured to 10-20 minutes). If a non-rest node fails to transition to a new node before the timeout expires, the engine aborts the hanging process and resets to `DefaultNode`.
+
+> [!WARNING]
+> **Strict Non-Blocking Rule**: Regardless of whether a node is a Rest Node or a Normal Node, its `Work`, `DoneCheck`, and `PreCheck` methods MUST NOT contain infinite polling loops, blocking channel reads (`<-chan`), or blocking network calls. 
+> 
+> The Node Engine relies on continuously iterating its main execution loop to evaluate Global Transitions (like the "Touchpad Control" or "Reboot" features). If a node's `Work` method blocks, the entire state machine freezes, and the system becomes completely unresponsive to WebSocket commands and global state changes. 
+> 
+> For long-running waits (e.g. waiting for a user to complete 2FA), set `IsRestNode: true`, let `Work` return immediately, and rely on the engine's built-in tick loop to evaluate the subsequent node's `PreCheck`.
 
 ### Automated Dumps & Artifacts
 When transitioning between nodes, the engine automatically leverages Chrome CDP to capture `.png` screenshots and `.html` DOM snapshots (`pre` and `post` Work execution). These artifacts are saved into the `logs/` directory sequentially (e.g., `0008_display_join_meeting_page_pre_screenshot.png`), providing a perfect visual timeline of exactly what the headless browser experienced.
