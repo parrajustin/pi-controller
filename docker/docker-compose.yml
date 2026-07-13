@@ -28,8 +28,8 @@ services:
       - 'settings:/data'
       - 'chrome_data:/chrome-data'
     environment:
-      LAUNCH_URL: "mountainviewmasoniclodge.com"
-      LAUNCH_URL_HDMI: "https://www.google.com"
+      LAUNCH_URL: "http://lounge_display:8080"
+      LAUNCH_URL_HDMI: "http://lounge_display:8080"
     depends_on:
       - wifi-connect
   lounge_display:

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"time"
 
 	"github.com/parrajustin/pi-controller/pkg/logger"
@@ -144,6 +145,35 @@ func getDockerComposeEnv() []string {
 	return env
 }
 
+func injectEnvVarsIntoComposeFile() {
+	composeFile := "docker/docker-compose.yml"
+	content, err := os.ReadFile(composeFile)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to read %s: %v", composeFile, err))
+		return
+	}
+
+	hostIP := getHostIP()
+	tokenKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	if tokenKey == "" {
+		tokenKey = "default-development-key"
+	}
+
+	// Regex to match `- HOST_IP=...` and replace the value
+	reHostIP := regexp.MustCompile(`(?m)^(\s*-\s*HOST_IP=).*$`)
+	newContent := reHostIP.ReplaceAllString(string(content), "${1}"+hostIP)
+
+	reToken := regexp.MustCompile(`(?m)^(\s*-\s*TOKEN_ENCRYPTION_KEY=).*$`)
+	newContent = reToken.ReplaceAllString(newContent, "${1}"+tokenKey)
+
+	err = os.WriteFile(composeFile, []byte(newContent), 0644)
+	if err != nil {
+		slog.Error(fmt.Sprintf("Failed to write to %s: %v", composeFile, err))
+	} else {
+		slog.Info("Successfully injected environment variables into docker-compose.yml")
+	}
+}
+
 func startDockerCompose() {
 	slog.Info("Starting docker compose services...")
 	cmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "up", "--build", "--force-recreate", "-d")
@@ -209,6 +239,8 @@ func handleResetKiosk(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("Resetting kiosk container..."))
 
 	go func() {
+		injectEnvVarsIntoComposeFile()
+		
 		pullCmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "pull", "kiosk")
 		pullCmd.Env = getDockerComposeEnv()
 		pullCmd.Stdout = os.Stdout
@@ -253,6 +285,8 @@ func main() {
 	checkAndReplaceSplash()
 
 	stopContainers()
+
+	injectEnvVarsIntoComposeFile()
 
 	cleanChromiumLocks()
 
