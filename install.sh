@@ -51,8 +51,19 @@ echo "Extraction and cleanup complete."
 
 CURRENT_DIR=$(pwd)
 SERVICE_NAME="pi-controller.service"
+ENV_FILE="/etc/pi-controller.env"
 
-echo "Step 7: Setting up the systemd service."
+echo "Step 7: Setting up the environment configuration..."
+echo -n "Please enter the Token Encryption Key (or press Enter to use default): "
+read TOKEN_KEY
+if [ -z "$TOKEN_KEY" ]; then
+    TOKEN_KEY="default-development-key"
+fi
+echo "TOKEN_ENCRYPTION_KEY=\"$TOKEN_KEY\"" > "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+echo "Created $ENV_FILE"
+
+echo "Step 8: Setting up the systemd service."
 echo "The binary will be run from the current directory: $CURRENT_DIR"
 echo "Generating systemd service file at /etc/systemd/system/${SERVICE_NAME}..."
 
@@ -66,7 +77,8 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=${CURRENT_DIR}
-ExecStart=${CURRENT_DIR}/pi-controller
+EnvironmentFile=${ENV_FILE}
+ExecStart=${CURRENT_DIR}/runner
 Restart=always
 RestartSec=5
 
@@ -76,13 +88,13 @@ EOF
 
 echo "Systemd service file created successfully."
 
-echo "Step 8: Reloading systemd daemon to recognize the new service..."
+echo "Step 9: Reloading systemd daemon to recognize the new service..."
 systemctl daemon-reload
 
-echo "Step 9: Enabling the ${SERVICE_NAME} to start automatically on boot..."
+echo "Step 10: Enabling the ${SERVICE_NAME} to start automatically on boot..."
 systemctl enable ${SERVICE_NAME}
 
-echo "Step 10: Starting the ${SERVICE_NAME} right now..."
+echo "Step 11: Starting the ${SERVICE_NAME} right now..."
 systemctl start ${SERVICE_NAME}
 
 echo "============================================================"

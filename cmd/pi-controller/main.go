@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,18 @@ import (
 const (
 	publicKeyFile = "publickey.pem"
 )
+
+func getHostIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		slog.Warn(fmt.Sprintf("Failed to get host IP, falling back to 127.0.0.1: %v", err))
+		return "127.0.0.1"
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
 
 func calculateMD5(filePath string) (string, error) {
 	file, err := os.Open(filePath)
@@ -103,9 +116,24 @@ func stopContainers() {
 	}
 }
 
+func getDockerComposeEnv() []string {
+	hostIP := getHostIP()
+	tokenKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
+	if tokenKey == "" {
+		slog.Warn("TOKEN_ENCRYPTION_KEY is not set in environment, using default for development")
+		tokenKey = "default-development-key"
+	}
+	
+	env := os.Environ()
+	env = append(env, fmt.Sprintf("HOST_IP=%s", hostIP))
+	env = append(env, fmt.Sprintf("TOKEN_ENCRYPTION_KEY=%s", tokenKey))
+	return env
+}
+
 func startDockerCompose() {
 	slog.Info("Starting docker compose services...")
 	cmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "up", "--build", "--force-recreate", "-d")
+	cmd.Env = getDockerComposeEnv()
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -168,6 +196,7 @@ func handleResetKiosk(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		pullCmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "pull", "kiosk")
+		pullCmd.Env = getDockerComposeEnv()
 		pullCmd.Stdout = os.Stdout
 		pullCmd.Stderr = os.Stderr
 		if err := pullCmd.Run(); err != nil {
@@ -175,6 +204,7 @@ func handleResetKiosk(w http.ResponseWriter, r *http.Request) {
 		}
 
 		upCmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "up", "--build", "--force-recreate", "-d", "kiosk")
+		upCmd.Env = getDockerComposeEnv()
 		upCmd.Stdout = os.Stdout
 		upCmd.Stderr = os.Stderr
 		if err := upCmd.Run(); err != nil {

@@ -13,7 +13,10 @@
         "version.json",
         "publickey.pem",
         "config.json",
-        "docker/docker-compose.yml"
+        "docker/docker-compose.yml",
+        "docker/loki-config.yaml",
+        "docker/tempo-config.yaml",
+        "docker/otel-collector-config.yaml"
     ],
     "root_files": [
         "pi-controller",

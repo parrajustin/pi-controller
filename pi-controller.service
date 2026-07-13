@@ -1,0 +1,17 @@
+[Unit]
+Description=Pi Controller Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# IMPORTANT: Update these paths to the location where the pi-controller release was extracted.
+# For example, if extracted to /opt/pi-controller, use the following:
+WorkingDirectory=/opt/pi-controller
+ExecStart=/opt/pi-controller/runner
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

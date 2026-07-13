@@ -67,8 +67,8 @@ services:
     environment:
       - PROMETHEUS_EXTRA_ARGS=--storage.tsdb.retention.time=60d
     volumes:
-      - ./lgtm/loki-config.yaml:/otel-lgtm/loki-config.yaml:ro
-      - ./lgtm/tempo-config.yaml:/otel-lgtm/tempo-config.yaml:ro
+      - ../docker/loki-config.yaml:/otel-lgtm/loki-config.yaml:ro
+      - ../docker/tempo-config.yaml:/otel-lgtm/tempo-config.yaml:ro
 
   otel-collector:
     logging:
@@ -77,7 +77,7 @@ services:
     container_name: otel-collector
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
-      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+      - ../docker/otel-collector-config.yaml:/etc/otel-collector-config.yaml
     ports:
       - "4318:4318"   # OTLP http for frontend telemetry
     depends_on:
