@@ -175,6 +175,17 @@ func injectEnvVarsIntoComposeFile() {
 }
 
 func startDockerCompose() {
+	slog.Info("Pulling latest docker images...")
+	pullCmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "pull")
+	pullCmd.Env = getDockerComposeEnv()
+	pullCmd.Stdout = os.Stdout
+	pullCmd.Stderr = os.Stderr
+	if err := pullCmd.Run(); err != nil {
+		slog.Warn(fmt.Sprintf("Failed to pull latest images (this may be normal if offline): %v", err))
+	} else {
+		slog.Info("Successfully pulled latest docker images.")
+	}
+
 	slog.Info("Starting docker compose services...")
 	cmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "up", "--build", "--force-recreate", "-d")
 	cmd.Env = getDockerComposeEnv()
