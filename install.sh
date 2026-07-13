@@ -55,7 +55,8 @@ ENV_FILE="/etc/pi-controller.env"
 
 echo "Step 7: Setting up the environment configuration..."
 echo -n "Please enter the Token Encryption Key (or press Enter to use default): "
-read TOKEN_KEY
+# Read from /dev/tty in case the script is piped via curl | bash
+read -r TOKEN_KEY < /dev/tty
 if [ -z "$TOKEN_KEY" ]; then
     TOKEN_KEY="default-development-key"
 fi
