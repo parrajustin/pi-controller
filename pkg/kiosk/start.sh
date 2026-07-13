@@ -100,6 +100,7 @@ launch_chrome() {
       --no-sandbox \\
       --disable-dev-shm-usage \\
       --ozone-platform=x11 \\
+      --touch-events=enabled \\
       --user-data-dir="\$DIR" \\
       \$EXTRA_ARGS \\
       "\$URL" &

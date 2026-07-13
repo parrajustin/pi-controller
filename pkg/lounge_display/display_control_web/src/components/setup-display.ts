@@ -27,9 +27,6 @@ export class SetupDisplay extends LitElement {
       display: flex;
       width: 100%;
       height: 100%;
-      /* 800x400 display target */
-      max-width: 800px;
-      max-height: 400px;
       margin: 0 auto;
       background-color: var(--bg-color, #202124);
       color: var(--text-primary, #e8eaed);
@@ -132,7 +129,7 @@ export class SetupDisplay extends LitElement {
       flex-direction: column;
       overflow: hidden;
       opacity: 1;
-      max-height: 400px;
+      max-height: 1000px;
       transition: all 500ms cubic-bezier(0.2, 0, 0, 1);
       flex-shrink: 0;
     }
@@ -179,7 +176,7 @@ export class SetupDisplay extends LitElement {
     }
 
     .extra-html-container.open {
-      max-height: 400px; /* arbitrary max height for smooth expansion */
+      max-height: 1000px; /* arbitrary max height for smooth expansion */
       opacity: 1;
       margin-bottom: 16px;
       flex-grow: 1;

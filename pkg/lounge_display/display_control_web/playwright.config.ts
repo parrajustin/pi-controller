@@ -22,14 +22,14 @@ export default defineConfig({
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
     
-    /* 800x400 Display */
-    viewport: { width: 800, height: 400 },
+    /* 800x480 Display */
+    viewport: { width: 800, height: 480 },
   },
 
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 800, height: 400 } },
+      use: { ...devices['Desktop Chrome'], viewport: { width: 800, height: 480 } },
     },
   ],
 
