@@ -4,6 +4,9 @@ export LAUNCH_URL=${LAUNCH_URL:-"https://www.mountainviewmasoniclodge.com"}
 export LAUNCH_URL_HDMI=${LAUNCH_URL_HDMI:-"https://www.google.com"}
 export CHROME_DATA_DIR=${CHROME_DATA_DIR:-"/chrome-data"}
 
+# Clean up any leftover lock files from sudden crashes so chromium can restart
+rm -f $CHROME_DATA_DIR/dsi/Singleton* $CHROME_DATA_DIR/hdmi/Singleton*
+
 # Dynamically generate xorg.conf based on connected DRM devices
 echo "=== Detecting Connected DRM Displays ==="
 CARDS=()

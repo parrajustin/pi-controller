@@ -116,6 +116,20 @@ func stopContainers() {
 	}
 }
 
+func cleanChromiumLocks() {
+	slog.Info("Cleaning up Chromium lock files from chrome_data volume...")
+	// Run a temporary container that mounts the chrome_data volume and removes lock files
+	cmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "run", "--rm", "--entrypoint", "/bin/sh", "kiosk", "-c", "rm -f /chrome-data/dsi/Singleton* /chrome-data/hdmi/Singleton* /chrome-data/Singleton*")
+	cmd.Env = getDockerComposeEnv()
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		slog.Warn(fmt.Sprintf("Failed to clean chromium locks (this might be normal if the container hasn't been built yet): %v", err))
+	} else {
+		slog.Info("Successfully cleaned chromium lock files.")
+	}
+}
+
 func getDockerComposeEnv() []string {
 	hostIP := getHostIP()
 	tokenKey := os.Getenv("TOKEN_ENCRYPTION_KEY")
@@ -203,6 +217,8 @@ func handleResetKiosk(w http.ResponseWriter, r *http.Request) {
 			slog.Error(fmt.Sprintf("Failed to pull kiosk: %v", err))
 		}
 
+		cleanChromiumLocks()
+
 		upCmd := exec.Command("docker", "compose", "-f", "docker/docker-compose.yml", "up", "--build", "--force-recreate", "-d", "kiosk")
 		upCmd.Env = getDockerComposeEnv()
 		upCmd.Stdout = os.Stdout
@@ -237,6 +253,8 @@ func main() {
 	checkAndReplaceSplash()
 
 	stopContainers()
+
+	cleanChromiumLocks()
 
 	startDockerCompose()
 
