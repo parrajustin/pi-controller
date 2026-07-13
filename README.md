@@ -9,7 +9,7 @@ The easiest way to install and start the `pi-controller` service is to use the a
 First, navigate to the directory where you want the binaries to live (e.g., `/opt/pi-controller`), and run the following command:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/parrajustin/pi-controller/main/install.sh | sudo bash
+sudo bash -c "$(curl -sL https://raw.githubusercontent.com/parrajustin/pi-controller/main/install.sh)"
 ```
 
 ### What this script does:
