@@ -12,8 +12,8 @@ import (
 	"os/exec"
 	"time"
 
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"github.com/parrajustin/pi-controller/pkg/logger"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const (
@@ -137,7 +137,7 @@ func getDockerComposeEnv() []string {
 		slog.Warn("TOKEN_ENCRYPTION_KEY is not set in environment, using default for development")
 		tokenKey = "default-development-key"
 	}
-	
+
 	env := os.Environ()
 	env = append(env, fmt.Sprintf("HOST_IP=%s", hostIP))
 	env = append(env, fmt.Sprintf("TOKEN_ENCRYPTION_KEY=%s", tokenKey))
@@ -274,9 +274,9 @@ func main() {
 
 	// Main application loop
 	// For now, it just simulates the pi-controller running
+	slog.Info("pi-controller is running in foreground...")
 	for {
-		slog.Info("pi-controller is running in foreground...")
-		time.Sleep(10 * time.Second)
+		time.Sleep(5 * time.Minute)
 		slog.Info("tick!")
 	}
 }
