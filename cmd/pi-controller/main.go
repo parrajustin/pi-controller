@@ -272,9 +272,47 @@ func handleResetKiosk(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+func setupFirewall() {
+	slog.Info("Setting up firewall...")
+	if _, err := exec.LookPath("ufw"); err != nil {
+		slog.Info("ufw is not installed. Attempting to install...")
+		
+		updateCmd := exec.Command("sudo", "apt-get", "update")
+		if err := updateCmd.Run(); err != nil {
+			slog.Error(fmt.Sprintf("Failed to update apt: %v", err))
+		}
+
+		installCmd := exec.Command("sudo", "apt-get", "install", "-y", "ufw")
+		installCmd.Stdout = os.Stdout
+		installCmd.Stderr = os.Stderr
+		if err := installCmd.Run(); err != nil {
+			logger.Fatalf("Error: Failed to install ufw: %v", err)
+		}
+	}
+
+	commands := [][]string{
+		{"sudo", "ufw", "default", "deny", "incoming"},
+		{"sudo", "ufw", "default", "allow", "outgoing"},
+		{"sudo", "ufw", "allow", "ssh"},
+		{"sudo", "ufw", "--force", "enable"},
+	}
+
+	for _, c := range commands {
+		cmd := exec.Command(c[0], c[1:]...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			slog.Error(fmt.Sprintf("Failed to execute firewall command %v: %v", c, err))
+		}
+	}
+	slog.Info("Firewall setup completed.")
+}
+
 func main() {
 	logger.Init("pi-controller")
 	slog.Info("Starting pi-controller...")
+
+	setupFirewall()
 
 	shutdown, err := InitTelemetry(context.Background())
 	if err != nil {
